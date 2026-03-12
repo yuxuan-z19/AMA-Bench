@@ -2,6 +2,7 @@ import json
 import argparse
 import sys
 import re
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import time
@@ -49,24 +50,37 @@ class ModelClient:
 
         elif self.provider == "openai":
             from openai import OpenAI
-            api_key = self.config.get("api_key", "")
-            return OpenAI(api_key=api_key)
+            # Use api_key from config if provided, otherwise will use OPENAI_API_KEY env var
+            api_key = self.config.get("api_key") or os.getenv("OPENAI_API_KEY")
+            if api_key:
+                return OpenAI(api_key=api_key)
+            else:
+                # Let OpenAI SDK handle the API key (will use OPENAI_API_KEY env var)
+                return OpenAI()
 
         elif self.provider == "deepseek":
             from openai import OpenAI
-            api_key = self.config.get("api_key", "")
+            api_key = self.config.get("api_key") or os.getenv("DEEPSEEK_API_KEY")
+            if not api_key:
+                raise ValueError("DeepSeek API key not found in config or DEEPSEEK_API_KEY environment variable")
             return OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
 
         elif self.provider == "gemini":
             import google.generativeai as genai
-            api_key = self.config.get("api_key", "")
+            api_key = self.config.get("api_key") or os.getenv("GOOGLE_API_KEY")
+            if not api_key:
+                raise ValueError("Gemini API key not found in config or GOOGLE_API_KEY environment variable")
             genai.configure(api_key=api_key)
             return genai
 
         elif self.provider in ["anthropic", "claude"]:
             from anthropic import Anthropic
-            api_key = self.config.get("api_key", "")
-            return Anthropic(api_key=api_key)
+            api_key = self.config.get("api_key") or os.getenv("ANTHROPIC_API_KEY")
+            if api_key:
+                return Anthropic(api_key=api_key)
+            else:
+                # Let Anthropic SDK handle the API key (will use ANTHROPIC_API_KEY env var)
+                return Anthropic()
 
         else:
             raise ValueError(f"Unsupported provider: {self.provider}")

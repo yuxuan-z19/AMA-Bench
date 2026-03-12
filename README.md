@@ -9,7 +9,7 @@ AMA-Bench is a benchmark for evaluating agent memory on long-horizon agent traje
 
 ![AMA-Bench memory formulation](assets/memform.png)
 
-## 📚 目录
+## 📚 Category
 
 - [🎬 Media](#media)
 - [🗞️ News](#news)
@@ -140,6 +140,29 @@ bash scripts/evaluate.sh \
   --judge-config configs/llm_judge.yaml
 ```
 
+### Judge Reliability
+
+We also performed a consistency check for the LLM-as-judge setup. 
+
+
+**Performance against human annotations**
+
+| Metric | Value |
+|---|---:|
+| Accuracy | 92.67% |
+| Precision | 96.45% |
+| Recall | 92.68% |
+| F1 Score | 94.53% |
+
+For the `qwen3-32B` long-context results, we further measured judge agreement across models:
+
+| Comparison | Agreement | Disagreement |
+|---|---:|---:|
+| GPT-5.4 vs. GPT-5.2 | 94.58% | 5.42% |
+| GPT-5.2 vs. Qwen3-32B | 91.80% | 8.20% |
+
+These results indicate that the judge model is well aligned with human annotations and remains highly consistent across different judge backbones.
+
 ---
 
 ## 🧩 Scripts
@@ -149,12 +172,18 @@ bash scripts/evaluate.sh \
 | `scripts/launch_vllm_32B.sh` | Launch vLLM server from a YAML config |
 | `scripts/run.sh` | End-to-end generation + evaluation pipeline |
 | `scripts/evaluate.sh` | Evaluate an existing answers JSONL with LLM-as-judge |
+| `scripts/run_cross_validation.sh` | Run cross-validation with multiple judges |
+| `scripts/cross_validate.py` | Compare evaluation results from two judges |
 
 **`launch_vllm_32B.sh`** — reads model and server settings from YAML, starts a vLLM OpenAI-compatible API, waits for the health endpoint, and logs to `vllm_server.log`.
 
 **`run.sh`** — launches the vLLM server if needed, runs answer generation with the configured method, then evaluates with LLM-as-judge.
 
 **`evaluate.sh`** — standalone judge evaluation for pre-generated answer files, useful for re-evaluating with a different judge model.
+
+**`run_cross_validation.sh`** — evaluates answers with both GPT-5.2 and Qwen3-32B judges, then compares results to measure inter-rater reliability.
+
+**`cross_validate.py`** — compares two evaluation result files and generates agreement statistics, including Cohen's Kappa and detailed disagreement analysis.
 
 ---
 
@@ -184,9 +213,18 @@ AMA-Bench/
 │   ├── method/             # Memory method implementations (BM25, embedding, AMA-Agent, …)
 │   ├── synthetic_data_gen/ # Trajectory synthesis tools (BabyAI, TextWorld)
 │   ├── run.py              # Main evaluation entry point
-│   └── evaluate.py         # LLM-as-judge evaluation
+│   ├── evaluate.py         # LLM-as-judge evaluation
+│   └── model_client.py     # Unified client for different LLM providers
 ├── configs/                # Model / judge / method configs
+│   ├── llm_judge.yaml      # VLLM judge config (Qwen3-32B)
+│   └── llm_judge_api.yaml  # API judge config (GPT-5.2, etc.)
 ├── scripts/                # Shell scripts for launching and evaluation
+│   ├── run.sh
+│   ├── evaluate.sh
+│   ├── run_cross_validation.sh  # Cross-validation pipeline
+│   └── cross_validate.py        # Cross-validation comparison tool
+├── docs/                   # Documentation
+│   └── CROSS_VALIDATION.md      # Cross-validation guide
 ├── dataset/                # Local dataset (test split, downloaded separately)
 ├── results/                # Prediction outputs and evaluation metrics
 ├── assets/                 # Figures

@@ -50,14 +50,16 @@ Reference Answer: {golden_answer}
 
 Predicted Answer: {predicted_answer}
 
-Is the predicted answer correct? Respond with ONLY "yes" or "no". Do not include any thinking process, explanation, or additional text.
+Is the predicted answer correct? Respond with reason and ONLY "yes" or "no".
 
-Answer:<think></think>"""
 
-    response = judge_client.query(prompt, temperature=0.0, max_tokens=50)
+Response with following format:
+Answer: yes or no. <think></think>"""
+
+    response = judge_client.query(prompt, temperature=0.0, max_tokens=8192)
 
     # Extract yes/no from response
-    response_lower = response.strip().lower()
+    response_lower = response
 
     # Check for yes/no in the response
     if "yes" in response_lower:
@@ -70,7 +72,7 @@ Answer:<think></think>"""
 
     return {
         'score': score,
-        'judge_response': response.strip(),
+        'judge_response': response
     }
 
 
@@ -289,10 +291,6 @@ def print_evaluation_summary(summary: Dict[str, Any]) -> None:
     print(f"  Average score: {summary['overall']['avg_score']:.4f}")
     print(f"  Accuracy: {summary['overall']['accuracy']:.4f}")
 
-    print(f"\n📋 By Task Type:")
-    for task_type, stats in sorted(summary.get('by_task_type', {}).items()):
-        print(f"  {task_type}:")
-        print(f"    Accuracy: {stats['accuracy']:.4f} ({stats['count']} questions)")
 
     print(f"\n🌐 By Domain:")
     for domain, stats in sorted(summary.get('by_domain', {}).items()):
