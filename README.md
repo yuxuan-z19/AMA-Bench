@@ -1,4 +1,4 @@
-# AMA-Bench: Evaluating Long-Horizon Memory for Agentic Applications
+# 🧠 AMA-Bench: Evaluating Long-Horizon Memory for Agentic Applications
 
 [![Website](https://img.shields.io/badge/Website-ama--bench.github.io-blue)](https://ama-bench.github.io/)
 [![Paper](https://img.shields.io/badge/arXiv-2602.22769-b31b1b.svg)](https://arxiv.org/abs/2602.22769)
@@ -8,6 +8,30 @@
 AMA-Bench is a benchmark for evaluating agent memory on long-horizon agent trajectories.
 
 ![AMA-Bench memory formulation](assets/memform.png)
+
+## 📚 目录
+
+- [🎬 Media](#media)
+- [🗞️ News](#news)
+- [🧭 Overview](#overview)
+- [🧠 Memory Architecture (Two-Stage)](#memory-architecture-two-stage)
+- [⚙️ Installation](#installation)
+- [📦 Dataset](#dataset)
+- [🚀 Quick Start](#quick-start)
+- [📊 Evaluation](#evaluation)
+- [🧩 Scripts](#scripts)
+- [🏆 Submit to Leaderboard](#submit-to-leaderboard)
+- [🏗️ Project Structure](#project-structure)
+- [🧪 Synthetic Data Generation](#synthetic-data-generation)
+- [🛠️ Add a New Method](#add-a-new-method)
+- [📖 Citation](#citation)
+- [📮 Contact](#contact)
+- [📄 License](#license)
+
+## 🎬 Media
+
+- AMA-Bench was featured by dair.ai: https://x.com/dair_ai/status/2027776582262395054
+- Special thanks to Vincent De Genova for the visual notes and homepage feature: https://vdegenova.github.io/visual-notes/visuals/ama-bench/
 
 ## 🗞️ News
 
@@ -19,7 +43,7 @@ AMA-Bench is a benchmark for evaluating agent memory on long-horizon agent traje
 
 ---
 
-## Overview
+## 🧭 Overview
 
 AMA-Bench evaluates whether a method can:
 
@@ -32,7 +56,7 @@ All methods share a unified two-stage interface defined in [src/method/base_meth
 - `memory_construction(traj_text, task="")` — build a memory object from trajectory text
 - `memory_retrieve(memory, question)` — retrieve relevant context for a question
 
-## Memory Architecture (Two-Stage)
+## 🧠 Memory Architecture (Two-Stage)
 
 ![Two-stage memory architecture](assets/mem_two_stage.png)
 
@@ -45,7 +69,7 @@ Each memory method is implemented in two stages:
 
 ---
 
-## Installation
+## ⚙️ Installation
 
 **Requirements:** Python 3.9–3.11 · Linux · CUDA GPU (recommended)
 
@@ -57,7 +81,7 @@ pip install -r requirements.txt
 
 ---
 
-## Dataset
+## 📦 Dataset
 
 Official dataset: [huggingface.co/datasets/AMA-bench/AMA-bench](https://huggingface.co/datasets/AMA-bench/AMA-bench)
 
@@ -75,21 +99,21 @@ dataset/
 
 ---
 
-## Quick Start
+## 🚀 Quick Start
 
-### Run end-to-end evaluation
+### ▶️ Run end-to-end evaluation
 
 ```bash
 bash scripts/run.sh
 ```
 
-### Run AMA-Agent
+### 🤖 Run AMA-Agent
 
 ```bash
 bash scripts/ama_agent.sh
 ```
 
-### Run via CLI
+### 💻 Run via CLI
 
 ```bash
 python src/run.py \
@@ -103,7 +127,7 @@ python src/run.py \
 
 ---
 
-## Evaluation
+## 📊 Evaluation
 
 `src/run.py` runs answer generation followed by LLM-as-judge scoring, saving outputs to `results/`.
 
@@ -118,7 +142,7 @@ bash scripts/evaluate.sh \
 
 ---
 
-## Scripts
+## 🧩 Scripts
 
 | Script | Description |
 |---|---|
@@ -134,7 +158,7 @@ bash scripts/evaluate.sh \
 
 ---
 
-## Submit to Leaderboard
+## 🏆 Submit to Leaderboard
 
 Visit the [AMA-Bench Leaderboard](https://huggingface.co/spaces/AMA-bench/AMA-bench-Leaderboard) and upload a JSONL file where each line is:
 
@@ -146,18 +170,13 @@ Required fields: `episode_id`, `answer_list`. `reasoning_trace` is optional.
 
 ---
 
-## Media
-
-- AMA-Bench was featured by dair.ai: https://x.com/dair_ai/status/2027776582262395054
-- Special thanks to Vincent De Genova for the visual notes and homepage feature: https://vdegenova.github.io/visual-notes/visuals/ama-bench/
-
-## Contact
+## 📮 Contact
 
 - yuz285@ucsd.edu
 
 ---
 
-## Project Structure
+## 🏗️ Project Structure
 
 ```text
 AMA-Bench/
@@ -174,7 +193,7 @@ AMA-Bench/
 └── utils/                  # Shared utilities
 ```
 
-### Synthetic Data Generation
+### 🧪 Synthetic Data Generation
 
 `src/synthetic_data_gen/` provides tools for generating trajectories used in the benchmark:
 
@@ -185,7 +204,7 @@ Both include trajectory generation, automatic QA pair creation via state trackin
 
 ---
 
-## Add a New Method
+## 🛠️ Add a New Method
 
 Create a subclass of `BaseMethod` and implement both stages:
 
@@ -206,7 +225,7 @@ Then register it in [src/method_register.py](src/method_register.py) to make it 
 
 ---
 
-## Citation
+## 📖 Citation
 
 ```bibtex
 @misc{zhao2026amabenchevaluatinglonghorizonmemory,
@@ -220,6 +239,6 @@ Then register it in [src/method_register.py](src/method_register.py) to make it 
 }
 ```
 
-## License
+## 📄 License
 
 MIT License. See [LICENSE](LICENSE).
