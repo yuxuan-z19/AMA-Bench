@@ -36,25 +36,34 @@ def evaluate_answer_with_llm_judge(
 
     context_str = "\n".join(context_parts) if context_parts else ""
 
-    prompt = f"""You are an expert evaluator. You will be given a question, a reference answer, and a predicted answer.
-Your task is to determine if the predicted answer is correct based on:
-1. Factual correctness compared to the reference
-2. Completeness of the answer
-3. Relevance to the question
+    # System prompt to clarify this is academic evaluation
+    system_prompt = """You are assisting with academic research on language model evaluation. Your task is to compare answers in a question-answering benchmark dataset to determine semantic equivalence. All content is from published academic datasets for research purposes."""
 
-{context_str}
+    prompt = f"""Compare these two answers to determine if they are semantically equivalent:
 
 Question: {question}
 
-Reference Answer: {golden_answer}
+Reference: {golden_answer}
 
-Predicted Answer: {predicted_answer}
+Response: {predicted_answer}
 
-Is the predicted answer correct? Respond with ONLY "yes" or "no". Do not include any thinking process, explanation, or additional text.
+Are these answers equivalent? Answer only "yes" or "no"."""
 
-Answer:"""
-
-    response = judge_client.query(prompt, temperature=0.0, max_tokens=1024)
+    # Try to query with system prompt (for Claude), fallback to regular prompt for other providers
+    try:
+        response = judge_client.query(prompt, temperature=0.0, max_tokens=1024, system=system_prompt)
+    except TypeError:
+        # If system parameter not supported, just use the prompt
+        response = judge_client.query(prompt, temperature=0.0, max_tokens=1024)
+    except ValueError as e:
+        # Handle refusals gracefully
+        if "refused" in str(e).lower():
+            print(f"⚠️  Claude refused to evaluate this question. Defaulting to 'no' (score=0.0)")
+            return {
+                'score': 0.0,
+                'judge_response': f"REFUSAL: {str(e)}",
+            }
+        raise
 
     # Extract yes/no from response
     response_lower = response.strip().lower()
@@ -77,7 +86,7 @@ Answer:"""
 def evaluate_batch(
     qa_results: List[Dict[str, Any]],
     judge_client: ModelClient,
-    max_workers: int = 10,
+    max_workers: int = 3,
 ) -> List[Dict[str, Any]]:
     """
     Evaluate a batch of QA results using LLM-as-judge with concurrent execution.

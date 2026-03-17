@@ -85,7 +85,7 @@ class ModelClient:
         else:
             raise ValueError(f"Unsupported provider: {self.provider}")
 
-    def query(self, prompt: str, temperature: float = 0.0, max_tokens: int = 4096, max_retries: int = 5) -> str:
+    def query(self, prompt: str, temperature: float = 0.0, max_tokens: int = 4096, max_retries: int = 5, system: Optional[str] = None) -> str:
         """Query model with prompt with retry logic for rate limits."""
         for attempt in range(max_retries):
             try:
@@ -130,12 +130,27 @@ class ModelClient:
                     return response.text.strip()
 
                 elif self.provider in ["anthropic", "claude"]:
-                    response = self.client.messages.create(
-                        model=self.model,
-                        messages=[{"role": "user", "content": prompt}],
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                    )
+                    # Build request parameters
+                    request_params = {
+                        "model": self.model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": temperature,
+                        "max_tokens": max_tokens,
+                    }
+                    # Add system parameter if provided
+                    if system:
+                        request_params["system"] = system
+
+                    response = self.client.messages.create(**request_params)
+
+                    # Handle response content
+                    if not response.content:
+                        # Check if it's a refusal
+                        if hasattr(response, 'stop_reason') and response.stop_reason == 'refusal':
+                            raise ValueError(f"Claude refused to respond. This may be due to content policy. Stop reason: {response.stop_reason}")
+                        raise ValueError(f"Empty response content from Claude API. Response: {response}")
+                    if not hasattr(response.content[0], 'text'):
+                        raise ValueError(f"Response content has no text attribute. Content type: {type(response.content[0])}, Content: {response.content[0]}")
                     return response.content[0].text.strip()
 
                 else:
@@ -143,7 +158,24 @@ class ModelClient:
                     
             except Exception as e:
                 error_str = str(e)
-                print(f"Error: {error_str}")
-        
+                # Don't retry on refusals or permanent errors
+                if "refused" in error_str.lower() or "refusal" in error_str.lower():
+                    raise
+                # Check if it's a rate limit error that should be retried
+                if "rate" in error_str.lower() or "429" in error_str:
+                    if attempt < max_retries - 1:
+                        wait_time = 2 ** attempt  # Exponential backoff
+                        print(f"Rate limit hit, retrying in {wait_time}s... (attempt {attempt + 1}/{max_retries})")
+                        time.sleep(wait_time)
+                        continue
+                # For other errors, retry with exponential backoff
+                if attempt < max_retries - 1:
+                    wait_time = min(2 ** attempt, 10)  # Cap at 10 seconds
+                    print(f"Error: {error_str}")
+                    print(f"Retrying in {wait_time}s... (attempt {attempt + 2}/{max_retries})")
+                    time.sleep(wait_time)
+                else:
+                    raise
+
         raise RuntimeError(f"Failed after {max_retries} retries")
 

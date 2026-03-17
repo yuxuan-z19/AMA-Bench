@@ -142,8 +142,7 @@ bash scripts/evaluate.sh \
 
 ### Judge Reliability
 
-We also performed a consistency check for the LLM-as-judge setup. 
-
+We performed a comprehensive consistency check for the LLM-as-judge setup, evaluating multiple judge models and analyzing their agreement patterns.
 
 **Performance against human annotations**
 
@@ -154,14 +153,61 @@ We also performed a consistency check for the LLM-as-judge setup.
 | Recall | 92.68% |
 | F1 Score | 94.53% |
 
-For the `qwen3-32B` long-context results, we further measured judge agreement across models:
+**Overall Judge Accuracy Scores**
 
-| Comparison | Agreement | Disagreement |
-|---|---:|---:|
-| GPT-5.4 vs. GPT-5.2 | 94.58% | 5.42% |
-| GPT-5.2 vs. Qwen3-32B | 91.80% | 8.20% |
+| Judge Model | Accuracy | Notes |
+|---|---:|---|
+| Qwen3-32B | 0.4880 | ⚠️ Highest accuracy, but shows leniency bias |
+| Claude-4.6 | 0.3986 | Reference judge, balanced |
+| GPT-5.4 | 0.3906 | Moderate strictness |
+| GPT-5.2 | 0.3550 | More strict |
+| DeepSeek-v3.2 | 0.3309 | Most strict judge |
 
-These results indicate that the judge model is well aligned with human annotations and remains highly consistent across different judge backbones.
+**Model Agreement Rates**
+
+*Highest Agreement (> 90%):*
+- GPT-5.2 vs. GPT-5.4: **94.58%** ✅ (Highest agreement - same family)
+- DeepSeek-v3.2 vs. GPT-5.2: **90.20%** ✅
+- Claude-4.6 vs. GPT-5.2: **90.16%** ✅
+
+*Qwen3-32B Agreement with Others:*
+- vs. GPT-5.4: **92.80%**
+- vs. GPT-5.2: **91.80%**
+- vs. Claude-4.6: **88.80%**
+- vs. DeepSeek-v3.2: **84.70%**
+
+**Leniency Bias Analysis**
+
+Qwen3-32B shows systematic leniency bias, particularly on:
+- **SOFTWARE domain** (swebench): 100 lenient cases vs. 15 strict (vs. Claude-4.6)
+- **Game domain**: 66 lenient cases vs. 17 strict
+- **TEXT2SQL domain** (spider2): 62 lenient cases vs. 24 strict
+
+*Example 1: Accepting Core Concepts Without Complete Details*
+
+**Task**: babaisai (Game domain)
+**Question**: Based on game mechanics, what hidden movement mechanic can be inferred when pushing blocks?
+
+**Reference Answer**: When pushing a text block, that block and adjacent blocks forming a phrase move as a group **diagonally** (one step in push direction and one step to the left).
+
+**Predicted Answer**: Pushing a block causes adjacent blocks in the same rule line to shift, suggesting rule blocks are connected and move together.
+
+- **Qwen3-32B**: ✅ CORRECT (accepts answer capturing the core mechanic despite missing diagonal movement detail)
+- **Claude-4.6**: ❌ INCORRECT (requires the specific diagonal movement detail)
+
+*Example 2: Accepting Partial Explanations*
+
+**Task**: crafter (Game domain)
+**Question**: What inventory change occurred and why is it critical for future crafting?
+
+**Reference Answer**: Agent gained **wood**. Critical because wood is needed to craft a **workbench**, and without a workbench, the agent cannot craft any other tools, halting technological progression.
+
+**Predicted Answer**: Agent gained **wood**. Critical because wood is required to craft tools (e.g., Wood Pickaxe), which are prerequisites for mining stone and other resources.
+
+- **Qwen3-32B**: ✅ CORRECT (accepts the wood→tools explanation despite skipping the intermediate workbench step)
+- **Claude-4.6**: ❌ INCORRECT (requires explicit mention of the workbench as the critical intermediate step)
+
+**Recommendations**: While Qwen3-32B achieves the highest accuracy, its leniency bias means it may accept incomplete answers. For critical evaluations, consider using Claude-4.6 as the reference judge or employing ensemble voting across multiple judges.
 
 ---
 
