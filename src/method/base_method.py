@@ -33,6 +33,8 @@ class BaseMethod(ABC):
         Returns:
             Configuration dictionary
         """
+        if config_path is None:
+            return {}
         path = Path(config_path)
         with open(path, 'r') as f:
             if path.suffix in ['.yaml', '.yml']:

@@ -58,13 +58,25 @@ class AMAAgentMethod(BaseMethod):
     ):
         config = self._load_config(config_path)
         self.temperature = config.get('temperature', 0)
-        self.max_tokens = config.get('max_tokens', 8192)
-        self.chunk_size = config.get('chunk_size', 8192)
+        self.chunk_size = config.get('chunk_size', 2048)
+        self.session_size = config.get('session_size', 16384)
         self.top_k = config.get('top_k', 5)
         self.causal = config.get('causal', False)
 
         self.client = client
         self.embedding_engine = embedding_engine
+
+        # max_tokens and max_model_length come from the LLM config, not method config
+        llm_cfg = client.config if (client is not None and hasattr(client, 'config')) else {}
+        vllm_launch = llm_cfg.get('vllm_launch', {})
+        self.max_tokens = (
+            llm_cfg.get('max_tokens')
+            or vllm_launch.get('max_response_len', 8192)
+        )
+        self.max_model_length = (
+            llm_cfg.get('max_model_len')
+            or vllm_launch.get('max_model_len', 131072)
+        )
 
     def _call_llm(self, prompt: str) -> tuple:
         """Synchronous LLM call using the provided client."""
@@ -96,6 +108,7 @@ class AMAAgentMethod(BaseMethod):
             task=task,
             call_llm_func=self._call_llm,
             chunk_size=self.chunk_size,
+            session_size=self.session_size,
             embed_engine=self.embedding_engine,
             causal=self.causal
         )
@@ -105,8 +118,11 @@ class AMAAgentMethod(BaseMethod):
         """
         Retrieve relevant context from memory to answer a question.
 
-        1. Retrieves top_k=5 chunks
-        2. LLM judges if the retrieved context is sufficient
+        Multi-stage pipeline (delegated to retrieve.memory_retrieve):
+        1. Check if state memory alone is sufficient
+        2. K=5 similarity-based node retrieval via embedding engine (port from config)
+        3. LLM self-evaluation; if insufficient, invoke graph-node search or keyword search
+        4. Synthesize all gathered evidence
 
         Args:
             memory: AMAAgentMemory object built by memory_construction
@@ -119,5 +135,7 @@ class AMAAgentMethod(BaseMethod):
             memory=memory.to_dict(),
             question=question,
             call_llm_func=self._call_llm,
-            top_k=self.top_k
+            top_k=self.top_k,
+            embed_engine=self.embedding_engine,
+            max_context_length=self.max_model_length - self.max_tokens,
         )

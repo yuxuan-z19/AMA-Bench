@@ -76,6 +76,8 @@ Each memory method is implemented in two stages:
 ```bash
 git clone https://github.com/AMA-Bench/AMA-Hub.git
 cd AMA-Hub
+python -m venv ama_venv
+source ama_venv/bin/activate
 pip install -r requirements.txt
 ```
 

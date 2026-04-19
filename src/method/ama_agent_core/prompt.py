@@ -147,66 +147,88 @@ Important: The code must be wrapped with **CODE**: marker followed by ```python 
 <think><\think>
 """
 
-COMPRESS_PROMPT_TEMPLATE = """You are analyzing a trajectory chunk to extract structured state information.
+COMPRESS_PROMPT_TEMPLATE = """You are presented with a section of agent trajectory (actions and observations). Read the provided section carefully and update the memory with new information that summarizes the agent's progress. Retain all relevant details from any previous memory while integrating new findings.
 
 Task: {task}
 
-Trajectory Chunk:
+Trajectory Section:
 {trajectory_text}
 
 {previous_state_text}
 
-Your task is to extract and organize key state information from the trajectory.
-
-You can use any format that works best (JSON, structured text, bullet points, etc.). For example:
-
-Example JSON format:
-{{
-  "objects": ["obj_1", "obj_2", "obj_3"],
-  "obj_state": {{
-    "obj_1": [
-      {{"t": 1, "action":"", "state": "exact description"}},
-      {{"t": 5, "action":"", "state": "exact description"}}
-    ]
-  }}
-}}
-
-
-Key requirements:
-1. Identify ALL relevant objects/entities/locations mentioned
-2. Track their state changes at specific turns with EXACT details
-3. Include precise values, locations, and concrete actions
-4. Record exact error messages or feedback when relevant
-5. List events chronologically for each object
-
-After your analysis, output your state memory after the marker:
+Identify KEY turns — turns where the environment or any object's state meaningfully changed.
+For each key turn record the full env_state and object_states snapshots.
+Also write a short Memory Summary describing the agent's overall progress in this section.
+Output everything after the marker below.
 
 **STATE_MEMORY**
-[Your state memory content here]
+
+memory_summary: <A concise summary of the agent's progress and key events in this section>
+turn_id: <turn number>
+env_state:
+- <key>: <value>
+- ...
+object_states:
+- name: <object_name>
+  state:
+  - <key>: <value>
+  - ...
+
+turn_id: <turn number>
+env_state:
+- <key>: <value>
+- ...
+object_states:
+- name: <object_name>
+  state:
+  - <key>: <value>
+  - ...
+
+Constraints:
+(1) Do not invent facts not supported by the provided trajectory.
+(2) Only record turns where state meaningfully changed — skip no-op turns.
+(3) Use consistent object names across all turns.
+(4) When previous memory is provided, retain its relevant details and update with new findings.
 """
 
-CHECK_STATE_MEM_PROMPT_TEMPLATE = """You are analyzing whether the compressed state memory contains enough information to answer a question.
-
-State Memory (compressed representation of the trajectory):
-{state_mem_str}
-
-Question: {query}
-
-Analyze if the state memory contains sufficient information to answer this question accurately.
-
-Consider:
-1. Does the state memory mention the relevant objects/entities in the question?
-2. Does it contain the specific information needed (states, relationships, actions)?
-3. Is the information detailed enough or just vague references?
-
-Respond with ONLY "SUFFICIENT" or "NEED_RETRIEVAL" followed by a brief reason.
-
+CHUNK_SUFFICIENCY_JUDGMENT_PROMPT_TEMPLATE = """
+You have retrieved the top ranked most relevant turns from an agent trajectory.
+Each turn has a UNIQUE TURN INDEX that you can reference.
+Query: {query}
+Retrieved Turns:
+{retrieved_chunks}
+Your Task
+Carefully analyze the retrieved turns and determine ONE of the following.
+1. SUFFICIENT
+The retrieved turns contain enough information to answer the query completely.
+If you choose this, you MUST provide the answer immediately in the same response.
 Format:
-SUFFICIENT: [reason why state memory is enough]
-or
-NEED_RETRIEVAL: [what specific information is missing and needs to be retrieved]
-
-Response:"""
+SUFFICIENT
+ANSWER: <your complete and accurate answer>
+2. NEED_GRAPH
+The query can likely be answered by looking at adjacent turns or specific ranges.
+Use this when you found relevant information but need surrounding context.
+You can specify retrieval in multiple ways.
+A. Request adjacent turns
+NEED_GRAPH: turn_5 before=2 after=1
+NEED_GRAPH: turn_8 before=3 after=0, turn_15 before=0 after=2
+B. Request turn ranges
+NEED_GRAPH: turns 5 to 10
+NEED_GRAPH: turns 3 to 8, turns 15 to 20
+C. Request individual turns
+NEED_GRAPH: turns 3, 7, 12, 18
+NEED_GRAPH: turns 5, 8, 15
+3. NEED_CODE
+The query requires computational analysis, pattern finding, counting, or aggregation
+across the full trajectory and cannot be answered from the retrieved turns alone.
+Format:
+NEED_CODE: <explain what computation or analysis is needed>
+Guidelines
+Choose SUFFICIENT only if you can answer completely right now.
+Choose NEED_GRAPH when you need immediate context around retrieved turns.
+Choose NEED_CODE for trajectory wide computation or when turns do not contain the answer.
+Response:
+"""
 
 TOOL_USE_PROMPT_TEMPLATE = """You are helping retrieve relevant information from a trajectory to answer a question.
 

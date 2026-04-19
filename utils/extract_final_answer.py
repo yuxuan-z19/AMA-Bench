@@ -1,3 +1,6 @@
+import re
+
+
 def extract_final_answer(response: str) -> str:
     """Extract the final answer from model response.
 
@@ -7,6 +10,9 @@ def extract_final_answer(response: str) -> str:
     Returns:
         Extracted answer string
     """
+    # Strip thinking blocks (e.g. from Qwen3 thinking mode)
+    response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL).strip()
+
     # Try to extract answer after "##Answer:" marker
     if "##Answer:" in response:
         parts = response.split("##Answer:")

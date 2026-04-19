@@ -25,7 +25,7 @@ CUDA_VISIBLE_DEVICES=$GPUS nohup python -m vllm.entrypoints.openai.api_server \
     > vllm_server.log 2>&1 &
 
 echo "PID: $! | Waiting for startup..."
-for i in {1..60}; do
+for i in {1..120}; do
     curl -sf "http://${VLLM_HOST}:${VLLM_PORT}/health" >/dev/null && echo "Ready!" && exit 0
     sleep 2
 done

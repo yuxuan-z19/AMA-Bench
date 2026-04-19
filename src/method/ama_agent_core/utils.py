@@ -7,10 +7,11 @@ import os
 import signal
 import subprocess
 import shutil
+import sys
 import tempfile
 import re
 import math
-from typing import Dict, List, Any, Tuple, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from pathlib import Path
 from collections import Counter
 import ray
@@ -295,114 +296,6 @@ def cosine_similarity(vec1, vec2) -> float:
 # Retrieval Functions
 # ============================================================================
 
-def retrieve_with_qwen(
-    query: str,
-    text_mem: Dict[str, Any],
-    call_llm_func
-) -> Tuple[Dict[str, Any], List[int]]:
-    """
-    Retrieve relevant chunks using Qwen3-4B for relevance scoring.
-
-    This method:
-    1. Chunks the trajectory into segments
-    2. Uses Qwen3-4B to score each chunk's relevance to the query
-    3. Returns top 5 most relevant chunks
-
-    Args:
-        query: Query string
-        text_mem: Text memory containing trajectory data
-        call_llm_func: Async LLM call function (should use qwen3-4b)
-
-    Returns:
-        Tuple of (keywords_info, relevant_turn_indices)
-    """
-    trajectory = text_mem['trajectory_data']['trajectory']
-
-    # Group trajectory into chunks (e.g., every 3-5 turns as one chunk)
-    chunk_size = 5
-    chunks = []
-    for i in range(0, len(trajectory), chunk_size):
-        chunk_turns = trajectory[i:i+chunk_size]
-        chunks.append(chunk_turns)
-
-
-    # Score each chunk using Qwen3-4B
-    chunk_scores = []
-    for chunk_idx, chunk_turns in enumerate(chunks):
-        # Format chunk text
-        chunk_text_parts = []
-        turn_indices = []
-        for turn in chunk_turns:
-            turn_idx = turn.get('turn_idx', 0)
-            action = turn.get('action', '')
-            observation = turn.get('observation', '')[:300]  # Truncate long observations
-            chunk_text_parts.append(f"Turn {turn_idx}: Action={action}, Observation={observation}")
-            turn_indices.append(turn_idx)
-
-        chunk_text = "\n".join(chunk_text_parts)
-
-        # Create relevance scoring prompt
-        relevance_prompt = f"""Rate the relevance of the following trajectory chunk to the query on a scale of 0-10.
-
-Query: {query}
-
-Trajectory Chunk:
-{chunk_text}
-
-Consider:
-- Does this chunk contain information directly answering the query?
-- Are there relevant actions, observations, or state changes?
-- How closely do the events relate to what the query is asking?
-
-Respond with ONLY a single number from 0 to 10, where:
-- 0 = completely irrelevant
-- 5 = somewhat relevant
-- 10 = highly relevant
-
-Score:"""
-
-        try:
-            _, score_response = call_llm_func(relevance_prompt)
-
-            # Parse score from response
-            score_match = re.search(r'(\d+(?:\.\d+)?)', score_response.strip())
-            if score_match:
-                score = float(score_match.group(1))
-                score = max(0.0, min(10.0, score))  # Clamp to [0, 10]
-            else:
-                score = 0.0
-        except Exception as e:
-            score = 0.0
-
-        chunk_scores.append((chunk_idx, turn_indices, score))
-
-    # Sort by score and get top 5 chunks
-    chunk_scores.sort(key=lambda x: x[2], reverse=True)
-    top_k = min(5, len(chunk_scores))
-
-    # Extract all turn indices from top chunks
-    relevant_turn_indices = []
-    for i in range(top_k):
-        chunk_idx, turn_indices, score = chunk_scores[i]
-        if score > 0:
-            relevant_turn_indices.extend(turn_indices)
-
-    # Remove duplicates and sort
-    relevant_turn_indices = sorted(list(set(relevant_turn_indices)))
-
-    # Extract keywords from query for metadata
-    keywords = re.findall(r'\w+', query.lower())
-    keywords_info = {
-        "keywords": keywords[:5],
-        "search_mode": "qwen_relevance",
-        "method": "qwen3-4b",
-        "num_chunks": len(chunks),
-        "top_chunks": top_k
-    }
-
-
-    return keywords_info, relevant_turn_indices
-
 
 async def retrieve_with_llm(
     query: str,
@@ -631,4 +524,318 @@ def truncate_trajectory_text(trajectory_text: str, max_length: int) -> str:
 
     truncated = trajectory_text[:head_length] + "\n...\n" + trajectory_text[-tail_length:]
     return truncated
+
+
+# ============================================================================
+# Trajectory chunk helpers
+# ============================================================================
+
+def _extract_chunks(
+    trajectory: List[Dict[str, Any]],
+    turn_indices: List[int],
+) -> List[Dict[str, Any]]:
+    """Extract and sort turn dicts for the given indices."""
+    index_set = set(turn_indices)
+    chunks = [
+        {
+            'turn':        t.get('turn_idx', -1),
+            'action':      t.get('action', ''),
+            'observation': t.get('observation', ''),
+        }
+        for t in trajectory
+        if t.get('turn_idx', -1) in index_set
+    ]
+    chunks.sort(key=lambda x: x['turn'])
+    return chunks
+
+
+_MAX_OBS_CHARS = 1500  # max observation chars per turn in formatted output
+
+def _format_chunks(chunks: List[Dict[str, Any]], max_obs_chars: int = _MAX_OBS_CHARS) -> str:
+    """Format a list of chunk dicts into a readable string."""
+    if not chunks:
+        return "No chunks retrieved."
+    lines = []
+    for chunk in chunks:
+        turn        = chunk.get('turn', 0)
+        action      = chunk.get('action', '')
+        observation = str(chunk.get('observation', ''))
+        if len(observation) > max_obs_chars:
+            observation = observation[:max_obs_chars] + "...[truncated]"
+        lines.extend([
+            f"Turn {turn}:",
+            f"  Action: {action}",
+            f"  Observation: {observation}",
+            "",
+        ])
+    return "\n".join(lines)
+
+
+# ============================================================================
+# Similarity retrieval
+# ============================================================================
+
+async def _async_similarity_retrieve(
+    question: str,
+    trajectory: List[Dict[str, Any]],
+    embed_engine: Optional[Any],
+    embed_mem: Optional[Dict[str, Any]],
+    top_k: int = 5,
+) -> List[int]:
+    """
+    Async similarity retrieval.  Query embedding and stored turn vectors are
+    handled concurrently via run_in_executor.
+
+    Priority:
+      1. embed_engine + pre-built embed_mem  → parallel query embed + stored turn vectors
+      2. neither / error                     → BM25 keyword fallback
+    """
+    if not trajectory:
+        return []
+
+    if embed_engine is not None:
+        try:
+            loop = asyncio.get_event_loop()
+            if embed_mem is not None:
+                query_emb = await loop.run_in_executor(None, embed_engine, question)
+                sims = [
+                    (turn_idx, cosine_similarity(query_emb, emb))
+                    for turn_idx, emb in zip(
+                        embed_mem['turn_indices'], embed_mem['embeddings']
+                    )
+                ]
+                sims.sort(key=lambda x: x[1], reverse=True)
+                return [idx for idx, _ in sims[:top_k]]
+        except Exception:
+            pass  # fall through to BM25 on any error
+
+    return _bm25_retrieve(question, trajectory, top_k=top_k)
+
+
+def _bm25_retrieve(
+    question: str,
+    trajectory: List[Dict[str, Any]],
+    top_k: int = 5,
+) -> List[int]:
+    """Simple BM25-style keyword fallback retrieval."""
+    query_tokens = set(question.lower().split())
+    scores: List[tuple] = []
+
+    for turn in trajectory:
+        turn_idx   = turn.get('turn_idx', 0)
+        doc_text   = f"{turn.get('action', '')} {turn.get('observation', '')}".lower()
+        doc_tokens = doc_text.split()
+        tf    = Counter(doc_tokens)
+        n     = len(doc_tokens) or 1
+        score = sum(tf.get(tok, 0) / n for tok in query_tokens)
+        scores.append((turn_idx, score))
+
+    scores.sort(key=lambda x: x[1], reverse=True)
+    non_zero = [idx for idx, s in scores if s > 0]
+    return (non_zero if non_zero else [s[0] for s in scores])[:top_k]
+
+
+def _similarity_retrieve(
+    question: str,
+    trajectory: List[Dict[str, Any]],
+    embed_engine: Optional[Any],
+    embed_mem: Optional[Dict[str, Any]],
+    top_k: int = 5,
+) -> List[int]:
+    """
+    Synchronous similarity retrieval — calls embed_engine directly (no event
+    loop required).  Falls back to BM25 when embed_engine / embed_mem are
+    absent or the embedding call raises.
+    """
+    if not trajectory:
+        return []
+
+    if embed_engine is not None and embed_mem is not None:
+        try:
+            query_emb = embed_engine(question)
+            sims = [
+                (turn_idx, cosine_similarity(query_emb, emb))
+                for turn_idx, emb in zip(
+                    embed_mem['turn_indices'], embed_mem['embeddings']
+                )
+            ]
+            sims.sort(key=lambda x: x[1], reverse=True)
+            return [idx for idx, _ in sims[:top_k]]
+        except Exception:
+            pass  # fall through to BM25
+
+    return _bm25_retrieve(question, trajectory, top_k=top_k)
+
+
+# ============================================================================
+# NEED_GRAPH: adjacency / range / index turn retrieval
+# ============================================================================
+
+def _retrieve_graph_turns(
+    trajectory: List[Dict[str, Any]],
+    response: str,
+) -> List[Dict[str, Any]]:
+    """
+    Parse a NEED_GRAPH response and retrieve the requested turns.
+
+    Supported spec formats (one or more NEED_GRAPH lines, comma-separated):
+
+      Adjacent turns
+        NEED_GRAPH: turn_5 before=2 after=1
+        NEED_GRAPH: turn_8 before=3 after=0, turn_15 before=0 after=2
+
+      Ranges
+        NEED_GRAPH: turns 5 to 10
+        NEED_GRAPH: turns 3 to 8, turns 15 to 20
+
+      Individual indices
+        NEED_GRAPH: turns 3, 7, 12, 18
+    """
+    turn_map: Dict[int, Dict[str, Any]] = {
+        t.get('turn_idx', -1): t for t in trajectory
+    }
+    all_indices = sorted(turn_map.keys())
+    requested: set = set()
+
+    for line in response.splitlines():
+        stripped = line.strip()
+        if not re.match(r'NEED_GRAPH\s*:', stripped, re.IGNORECASE):
+            continue
+
+        spec = re.sub(r'^NEED_GRAPH\s*:\s*', '', stripped, flags=re.IGNORECASE).strip()
+
+        for clause in spec.split(','):
+            clause = clause.strip()
+            if not clause:
+                continue
+
+            # Format A: turn_5 before=2 after=1
+            m = re.match(
+                r'turn[_\s](\d+)(?:\s+before=(\d+))?(?:\s+after=(\d+))?',
+                clause, re.IGNORECASE
+            )
+            if m:
+                center = int(m.group(1))
+                before = int(m.group(2)) if m.group(2) else 0
+                after  = int(m.group(3)) if m.group(3) else 0
+                for idx in all_indices:
+                    if center - before <= idx <= center + after:
+                        requested.add(idx)
+                continue
+
+            # Format B: turns X to Y
+            m = re.match(r'turns?\s+(\d+)\s+to\s+(\d+)', clause, re.IGNORECASE)
+            if m:
+                lo, hi = int(m.group(1)), int(m.group(2))
+                for idx in all_indices:
+                    if lo <= idx <= hi:
+                        requested.add(idx)
+                continue
+
+            # Format C: turns X, Y, Z
+            clause_clean = re.sub(r'^turns?\s*', '', clause, flags=re.IGNORECASE)
+            for n in re.findall(r'\d+', clause_clean):
+                idx = int(n)
+                if idx in turn_map:
+                    requested.add(idx)
+
+    return _extract_chunks(trajectory, list(requested))
+
+
+# ============================================================================
+# NEED_CODE: keyword / code-execution search
+# ============================================================================
+
+def _run_keyword_search(
+    trajectory_data: Dict[str, Any],
+    question: str,
+    task: str,
+    call_llm_func: Callable,
+    previous_error: str = "",
+    timeout: float = 30.0,
+) -> str:
+    """
+    LLM generates a Python script that operates on the trajectory; the script is
+    executed in an isolated subprocess for precise keyword matching and
+    statistical aggregation.
+
+    Args:
+        previous_error: Error output from a prior failed attempt; when non-empty
+                        it is appended to the code-generation prompt so the LLM
+                        can fix the mistake.
+    """
+    from .prompt import CODE_GENERATION_PROMPT_TEMPLATE
+
+    trajectory    = trajectory_data.get('trajectory', [])
+    sample_chunks = [
+        {
+            'turn':        t.get('turn_idx', i),
+            'action':      t.get('action', ''),
+            'observation': t.get('observation', '')[:100],
+        }
+        for i, t in enumerate(trajectory[:3])
+    ]
+    code_prompt = CODE_GENERATION_PROMPT_TEMPLATE.format(
+        query=question,
+        task=task,
+        trajectory_sample=_format_chunks(sample_chunks),
+    )
+    if previous_error:
+        # Truncate to avoid blowing up context length (errors can contain full trajectory JSON)
+        _MAX_ERROR_CHARS = 3000
+        truncated_error = previous_error if len(previous_error) <= _MAX_ERROR_CHARS else previous_error[:_MAX_ERROR_CHARS] + "\n...[truncated]"
+        code_prompt += (
+            "\n\n**Previous attempt failed with the following error — fix it in your new code:**\n"
+            f"```\n{truncated_error}\n```\n"
+        )
+    _, code_response = call_llm_func(code_prompt)
+    code = extract_code_from_response(code_response)
+
+    if not code:
+        return "Keyword search: no code was generated."
+
+    traj_json_str = json.dumps(trajectory_data)
+    full_script = (
+        f"trajectory_json = {repr(traj_json_str)}\n\n"
+        f"{code}\n\n"
+        "if 'result' in dir():\n"
+        "    import json as _json\n"
+        "    print(_json.dumps(result) if not isinstance(result, str) else result)"
+    )
+
+    os.makedirs("tmp", exist_ok=True)
+    tmpdir = tempfile.mkdtemp(prefix="mem_exec_", dir="tmp")
+    script_path = os.path.join(tmpdir, "script.py")
+    result = "Keyword search: empty result."
+    try:
+        with open(script_path, "w", encoding="utf-8") as f:
+            f.write(full_script)
+
+        workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+        venv_python = os.path.join(workspace_root, "ama_venv", "bin", "python")
+        python_executable = venv_python if os.path.exists(venv_python) else sys.executable
+
+        proc = subprocess.run(
+            [python_executable, script_path],
+            capture_output=True,
+            timeout=timeout,
+            cwd=tmpdir,
+        )
+        stderr_str = proc.stderr.decode(errors="replace")
+        stdout_str = proc.stdout.decode(errors="replace")
+        if stderr_str.strip():
+            # Cap error output so it never bloats the next code-gen prompt
+            _MAX_STDERR = 2000
+            _MAX_STDOUT_ERR = 1000
+            _s = stderr_str if len(stderr_str) <= _MAX_STDERR else stderr_str[:_MAX_STDERR] + "\n...[truncated]"
+            _o = stdout_str if len(stdout_str) <= _MAX_STDOUT_ERR else stdout_str[:_MAX_STDOUT_ERR] + "\n...[truncated]"
+            result = f"error: {_s}\n\nSTDOUT:\n{_o}"
+        else:
+            result = stdout_str if stdout_str else "Keyword search: empty result."
+    except subprocess.TimeoutExpired:
+        result = "timeout"
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+    return result
 

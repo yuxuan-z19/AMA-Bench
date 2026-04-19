@@ -52,43 +52,12 @@ def print_summary(
     print(f"Total time: {total_time:.2f}s")
     print(f"Average time per QA: {total_time/len(results):.2f}s")
 
-    # Per task type
-    _print_task_type_metrics(results, llm_as_judge)
+
 
     # Per QA type
     _print_qa_type_metrics(results, llm_as_judge)
 
     print(f"{'='*70}\n")
-
-
-def _print_task_type_metrics(results: List[QAResult], llm_as_judge: str):
-    """Print metrics grouped by task type."""
-    task_metrics = defaultdict(lambda: {"em": [], "f1": [], "llm_judge": []})
-
-    for r in results:
-        task_metrics[r.task_type]["em"].append(r.exact_match)
-        if r.f1_score is not None:
-            task_metrics[r.task_type]["f1"].append(r.f1_score)
-        if r.llm_judge_score is not None:
-            task_metrics[r.task_type]["llm_judge"].append(r.llm_judge_score)
-
-    print(f"\n{'='*70}")
-    print("Per Task Type:")
-    print(f"{'='*70}")
-
-    for task_type, metrics in sorted(task_metrics.items()):
-        avg_em = sum(metrics["em"]) / len(metrics["em"])
-        avg_f1 = sum(metrics["f1"]) / len(metrics["f1"]) if metrics["f1"] else 0.0
-
-        metrics_str = f"  {task_type}: EM={avg_em:.4f}, F1={avg_f1:.4f}"
-
-        if llm_as_judge != "none" and metrics["llm_judge"]:
-            avg_llm = sum(metrics["llm_judge"]) / len(metrics["llm_judge"])
-            llm_accuracy = sum(1 for s in metrics["llm_judge"] if s >= 0.5) / len(metrics["llm_judge"])
-            metrics_str += f", LLM Judge={avg_llm:.4f}, Accuracy={llm_accuracy:.4f}"
-
-        metrics_str += f" (n={len(metrics['em'])})"
-        print(metrics_str)
 
 
 def _print_qa_type_metrics(results: List[QAResult], llm_as_judge: str):

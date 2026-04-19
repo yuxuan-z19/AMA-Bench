@@ -1,10 +1,10 @@
 # AMA-Agent Method Configuration
 
 # Method-specific settings for AMA-Agent
-retrieval_mode: "bm25"  # Options: "none", "bm25", "llm", "embed"
+retrieval_mode: "embed"  # Options: "none", "bm25", "llm", "embed"
 temperature: 0
-max_tokens: 32000
-chunk_size: 8192
+chunk_size: 2048
+session_size: 16384
 enable_tools: true
 casual: false
 
@@ -15,8 +15,23 @@ api_key: "EMPTY"
 
 # Embedding engine configuration
 embedding_engine:
-  model_name: "qwen3-embedding-4B"
-  base_url: "http://localhost:8003/v1"
+  model_name: "Qwen/Qwen3-Embedding-4B"
+  base_url: "http://127.0.0.1:8003/v1"
+  host: "127.0.0.1"
+  port: 8003
   api_key: "EMPTY"
   batch_size: 8
-  max_length: 512
+  max_length: 16384
+
+  # local launch hints; require launcher support in code
+  auto_launch: true
+  backend: "vllm"
+  runner: "pooling"
+
+  # GPU selection
+  cuda_visible_devices: "6,7"
+  tensor_parallel_size: 2
+
+  # optional serving args for local embedding server
+  gpu_memory_utilization: 0.9
+  startup_timeout: 120

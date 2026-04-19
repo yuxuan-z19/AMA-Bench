@@ -1,86 +1,10 @@
-import re
 import json
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from src.model_client import ModelClient
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
-def evaluate_answer_with_llm_judge(
-    question: str,
-    predicted_answer: str,
-    golden_answer: str,
-    judge_client: ModelClient,
-    task_description: str = "",
-    task_type: str = "",
-    episode_id: str = "",
-) -> Dict[str, Any]:
-    """
-    Evaluate an answer using LLM-as-judge with binary (yes/no) judgment.
-
-    Args:
-        question: The question asked
-        predicted_answer: Model's predicted answer
-        golden_answer: Ground truth/reference answer
-        judge_client: ModelClient for LLM judge
-        task_description: Task description for context
-        task_type: Type of task
-        episode_id: Episode identifier
-
-    Returns:
-        Dictionary with 'score' (1.0 if correct, 0.0 if incorrect) and 'judge_response'
-    """
-    # Build context information
-    context_parts = []
-    context_parts.append(f"Episode ID: {episode_id}")
-    context_parts.append(f"Task Context: {task_description}")
-
-    context_str = "\n".join(context_parts) if context_parts else ""
-
-    # System prompt to clarify this is academic evaluation
-    system_prompt = """You are assisting with academic research on language model evaluation. Your task is to compare answers in a question-answering benchmark dataset to determine semantic equivalence. All content is from published academic datasets for research purposes."""
-
-    prompt = f"""Compare these two answers to determine if they are semantically equivalent:
-
-Question: {question}
-
-Reference: {golden_answer}
-
-Response: {predicted_answer}
-
-Are these answers equivalent? Answer only "yes" or "no"."""
-
-    # Try to query with system prompt (for Claude), fallback to regular prompt for other providers
-    try:
-        response = judge_client.query(prompt, temperature=0.0, max_tokens=1024, system=system_prompt)
-    except TypeError:
-        # If system parameter not supported, just use the prompt
-        response = judge_client.query(prompt, temperature=0.0, max_tokens=1024)
-    except ValueError as e:
-        # Handle refusals gracefully
-        if "refused" in str(e).lower():
-            print(f"⚠️  Claude refused to evaluate this question. Defaulting to 'no' (score=0.0)")
-            return {
-                'score': 0.0,
-                'judge_response': f"REFUSAL: {str(e)}",
-            }
-        raise
-
-    # Extract yes/no from response
-    response_lower = response.strip().lower()
-
-    # Check for yes/no in the response
-    if "yes" in response_lower:
-        score = 1.0
-    elif "no" in response_lower:
-        score = 0.0
-    else:
-        # Default to 0.0 if unclear
-        score = 0.0
-
-    return {
-        'score': score,
-        'judge_response': response.strip(),
-    }
+from tqdm import tqdm
+from utils.evaluation_metrics import compute_llm_as_judge
 
 
 def evaluate_batch(
@@ -104,22 +28,16 @@ def evaluate_batch(
 
     def evaluate_single(result: Dict[str, Any]) -> Dict[str, Any]:
         """Evaluate a single QA result."""
-        question = result['question']
-        predicted_answer = result['predicted_answer']
-        golden_answer = result['golden_answer']
-
-        eval_result = evaluate_answer_with_llm_judge(
-            question=question,
-            predicted_answer=predicted_answer,
-            golden_answer=golden_answer,
+        score = compute_llm_as_judge(
+            question=result['question'],
+            golden_answer=result['golden_answer'],
+            predicted_answer=result['predicted_answer'],
             judge_client=judge_client,
             task_description=result.get('task_description', ''),
             task_type=result.get('task_type', ''),
             episode_id=str(result.get('episode_id', '')),
         )
-
-        # Add evaluation results to the result dict
-        result.update(eval_result)
+        result['score'] = score
         return result
 
     # Use thread pool for concurrent evaluation
@@ -130,8 +48,10 @@ def evaluate_batch(
             for result in qa_results
         }
 
-        for future in as_completed(future_to_result):
-            evaluated_results.append(future.result())
+        with tqdm(total=len(qa_results), desc="Evaluating QA pairs", unit="pair") as pbar:
+            for future in as_completed(future_to_result):
+                evaluated_results.append(future.result())
+                pbar.update(1)
 
     return evaluated_results
 
@@ -297,11 +217,6 @@ def print_evaluation_summary(summary: Dict[str, Any]) -> None:
     print(f"  Total questions: {summary['overall']['total_questions']}")
     print(f"  Average score: {summary['overall']['avg_score']:.4f}")
     print(f"  Accuracy: {summary['overall']['accuracy']:.4f}")
-
-    print(f"\n📋 By Task Type:")
-    for task_type, stats in sorted(summary.get('by_task_type', {}).items()):
-        print(f"  {task_type}:")
-        print(f"    Accuracy: {stats['accuracy']:.4f} ({stats['count']} questions)")
 
     print(f"\n🌐 By Domain:")
     for domain, stats in sorted(summary.get('by_domain', {}).items()):

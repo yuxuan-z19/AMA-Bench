@@ -76,16 +76,29 @@ Examples:
                         help="Path to judge LLM configuration YAML file. Required when --evaluate True")
     parser.add_argument("--judge-server", type=str, choices=["api", "vllm"], default="api",
                         help="Judge server type (api or vllm). Default: api")
+    parser.add_argument("--judge-max-concurrency", type=int, default=None,
+                        help="Max concurrent judge workers. Default: max-concurrency-episodes * max-concurrency-questions-per-episode")
 
     # Evaluation flag
     parser.add_argument("--evaluate", type=lambda x: x.lower() == 'true', default=True,
                         help="Whether to evaluate answers after generation. Default: True")
+
+    # Sampling / filtering configuration
+    parser.add_argument("--samples", type=int, default=None,
+                        help="Randomly sample N episodes from the dataset. Cannot be used together with --domains")
+    parser.add_argument("--domains", type=str, default=None,
+                        help="Comma-separated list of domains to evaluate (e.g. 'embodied_ai,software_engineer'). "
+                             "Cannot be used together with --samples")
 
     # Output configuration
     parser.add_argument("--output-dir", type=str, default="results",
                         help="Output directory for results. Default: results")
 
     args = parser.parse_args()
+
+    # Validate mutual exclusivity of --samples and --domains
+    if args.samples is not None and args.domains is not None:
+        parser.error("--samples and --domains cannot be used at the same time. Use one or the other.")
 
     # Auto-configure test file based on test_dir and subset
     if args.test_file is None:
@@ -106,6 +119,17 @@ Examples:
     available_methods = list_methods()
     if args.method not in available_methods:
         parser.error(f"Invalid method '{args.method}'. Available methods: {', '.join(available_methods)}")
+
+    # For longcontext, default method_config to llm_config so model length settings are picked up
+    if args.method == "longcontext" and not args.method_config:
+        args.method_config = args.llm_config
+
+    # For ama_agent, auto-load configs/ama_agent.yaml (embedding engine config lives there)
+    if args.method == "ama_agent" and not args.method_config:
+        default_ama_config = "configs/ama_agent.yaml"
+        if Path(default_ama_config).exists():
+            args.method_config = default_ama_config
+            print(f"Auto-using AMA-Agent config: {default_ama_config}")
 
     # Create main LLM client
     client = ModelClient(config_path=args.llm_config, server_type=args.llm_server)
@@ -140,10 +164,44 @@ Examples:
                         api_key=embedding_config.get('api_key', 'EMPTY'),
                         batch_size=embedding_config.get('batch_size', 8),
                         max_length=embedding_config.get('max_length', 512),
+                        auto_launch=embedding_config.get('auto_launch', False),
+                        host=embedding_config.get('host', '127.0.0.1'),
+                        port=embedding_config.get('port', 8003),
+                        runner=embedding_config.get('runner', 'pooling'),
+                        cuda_visible_devices=embedding_config.get('cuda_visible_devices'),
+                        tensor_parallel_size=embedding_config.get('tensor_parallel_size', 1),
+                        gpu_memory_utilization=embedding_config.get('gpu_memory_utilization', 0.9),
+                        startup_timeout=embedding_config.get('startup_timeout', 120),
                     )
                     print(f"✅ Initialized embedding engine: {embedding_config.get('model_name')}")
         except Exception as e:
             print(f"⚠️ Warning: Failed to initialize embedding engine: {e}")
+
+    # Register shutdown hook so the embedding server is stopped on any exit path
+    if embedding_engine is not None:
+        import atexit
+        atexit.register(embedding_engine.shutdown)
+
+    # Load and filter episodes (for --samples or --domains)
+    filtered_episodes = None
+    if args.samples is not None or args.domains is not None:
+        import random
+        all_episodes = []
+        with open(args.test_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                all_episodes.append(json.loads(line.strip()))
+
+        if args.domains is not None:
+            target_domains = {d.strip() for d in args.domains.split(',')}
+            filtered_episodes = [ep for ep in all_episodes if ep.get('domain', '') in target_domains]
+            print(f"Filtering by domains {target_domains}: {len(all_episodes)} → {len(filtered_episodes)} episodes")
+        elif args.samples is not None:
+            if args.samples >= len(all_episodes):
+                filtered_episodes = all_episodes
+                print(f"--samples {args.samples} >= total episodes {len(all_episodes)}, using all episodes")
+            else:
+                filtered_episodes = random.sample(all_episodes, args.samples)
+                print(f"Randomly sampled {args.samples} episodes from {len(all_episodes)} total")
 
     # Create interface
     interface = MemoryQAInterface(
@@ -173,7 +231,7 @@ Examples:
     print("\n" + "="*70)
     print("PHASE 1: GENERATING ANSWERS")
 
-    episode_results = interface.run(file_path=args.test_file)
+    episode_results = interface.run(file_path=args.test_file, episodes=filtered_episodes)
 
     # Save answers to JSONL
     with open(answers_path, 'w') as f:
@@ -226,10 +284,14 @@ Examples:
             })
 
     # Evaluate using LLM judge
-    print(f"\n🔍 Evaluating {len(all_qa_results)} QA pairs...")
+    judge_max_concurrency = args.judge_max_concurrency or (
+        args.max_concurrency_episodes * args.max_concurrency_questions_per_episode
+    )
+    print(f"\n🔍 Evaluating {len(all_qa_results)} QA pairs... (judge concurrency: {judge_max_concurrency})")
     evaluated_results = evaluate_batch(
         qa_results=all_qa_results,
         judge_client=judge_client,
+        max_workers=judge_max_concurrency,
     )
 
     # Calculate statistics by different dimensions

@@ -1,4 +1,5 @@
 import json
+import re
 import asyncio
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -49,7 +50,11 @@ class MemoryQAInterface:
         self.max_concurrency_episodes = max_concurrency_episodes
         self.max_concurrency_questions = max_concurrency_questions
         self.subset = subset
-        self.max_tokens = client.config.get('max_tokens', 4096)
+        vllm_launch = client.config.get('vllm_launch', {})
+        self.max_tokens = (
+            client.config.get('max_tokens')
+            or vllm_launch.get('max_response_len', 4096)
+        )
         self.embedding_engine = embedding_engine
 
         if method_config:
@@ -83,10 +88,10 @@ class MemoryQAInterface:
             turn_idx = step.get("turn_idx", 0)
             action = step.get("action", "")
             observation = step.get("observation", "")
-
             text_parts.append(f"Step {turn_idx}:")
-            text_parts.append(f"  Action: {action}")
-            text_parts.append(f"  Observation: {observation}")
+            text_parts.append(f"Action: {action}")
+            text_parts.append(f"Observation: {observation}")
+            text_parts.append("")
 
         return "\n".join(text_parts)
 
@@ -129,27 +134,36 @@ class MemoryQAInterface:
             Dictionary with 'final_answer' and 'reasoning_trace'
         """
         retrieved_context = self.method.memory_retrieve(memory, question)
-        if self.subset == "mcq":
-            answer_format = """Please provide your final answer in the following format:
-###Answer: (X)
-where X is the correct option letter (A, B, C, or D)."""
-        else:  # openend
-            answer_format = """Please provide your final answer in the following format:
-###Answer: [your answer here]"""
-        prompt = f"""{retrieved_context}
 
-# Question
-{question}
+        mcq_mode = (self.subset == "mcq")
+        if mcq_mode:
+            instructions = (
+                "Select all correct options and respond using "
+                "the format (A), (B), (C), or (D). "
+                "If multiple options are correct, combine them like (A)(B)."
+            )
+            answer_slot = "Answer[1]: [(A)/(B)/(C)/(D) or combination such as (A)(B)]"
+        else:
+            instructions = "Provide a direct and concise answer."
+            answer_slot = "Answer[1]: [your answer here]"
 
-{answer_format}
+        prompt = (
+            f"{retrieved_context}\n\n"
+            f"## Questions\n"
+            f"Question 1: {question}\n\n"
+            f"## Instructions\n"
+            f"{instructions}\n\n"
+            f"{answer_slot}"
+        )
 
-Answer:"""
-
-        # Step 4: Query the LLM with max_tokens from config
         response = self.client.query(prompt, temperature=temperature, max_tokens=self.max_tokens)
-        
-        # Step 5: Extract final answer
-        final_answer = extract_final_answer(response)
+
+        match = re.search(r"Answer\[1\]:\s*(.+?)$", response, re.DOTALL)
+        if match:
+            answer_text = match.group(1).strip()
+            final_answer = extract_final_answer(f"###Answer: {answer_text}")
+        else:
+            final_answer = extract_final_answer(response)
 
         return {
             'final_answer': final_answer,
@@ -166,6 +180,10 @@ Answer:"""
         """
         Answer all questions in a single batch call (for longcontext method).
 
+        Delegates prompt construction (including trajectory truncation) entirely to
+        memory_retrieve, which returns a complete create_long_context_prompt-style
+        prompt ready to send to the LLM.
+
         Args:
             questions: List of questions
             memory: Memory object
@@ -174,48 +192,23 @@ Answer:"""
         Returns:
             List of final answers
         """
-        # Retrieve context once
-        retrieved_context = self.method.memory_retrieve(memory, "")
+        mcq_mode = (self.subset == "mcq")
 
-        # Determine answer format based on subset
-        if self.subset == "mcq":
-            answer_format = "For each question, provide your answer in the format: ###Answer N: (X) where N is the question number and X is the option letter (A, B, C, or D)."
-        else:
-            answer_format = "For each question, provide your answer in the format: ###Answer N: [your answer] where N is the question number."
-
-        # Build batch prompt
-        questions_text = "\n\n".join([
-            f"Question {i+1}: {q}"
-            for i, q in enumerate(questions)
-        ])
-
-        prompt = f"""{retrieved_context}
-
-# Questions
-{questions_text}
-
-# Instructions
-Please answer ALL questions above based on the provided context.
-{answer_format}
-
-Answers:"""
+        # memory_retrieve builds the complete prompt and handles truncation
+        prompt = self.method.memory_retrieve(memory, questions, mcq_mode=mcq_mode)
 
         # Query LLM once for all questions
         response = self.client.query(prompt, temperature=temperature, max_tokens=self.max_tokens)
 
-        # Extract answers
+        # Parse Answer[{i}]: markers
         answer_list = []
         for i in range(len(questions)):
-            # Try to extract answer for question i+1
-            import re
-            pattern = rf"###Answer {i+1}:\s*(.+?)(?=###Answer {i+2}:|$)"
+            pattern = rf"Answer\[{i+1}\]:\s*(.+?)(?=Answer\[{i+2}\]:|$)"
             match = re.search(pattern, response, re.DOTALL)
             if match:
                 answer_text = match.group(1).strip()
-                # Extract just the final answer part
                 final_answer = extract_final_answer(f"###Answer: {answer_text}")
             else:
-                # Fallback: try to extract from response
                 final_answer = extract_final_answer(response)
             answer_list.append(final_answer)
 
@@ -283,13 +276,15 @@ Answers:"""
             'reasoning_trace': reasoning_trace,
         }
 
-    def run(self, file_path: str) -> List[Dict[str, Any]]:
+    def run(self, file_path: str, episodes: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
         """
         Process a single JSONL file containing multiple episodes.
         Each episode contains multiple QA pairs.
 
         Args:
             file_path: Path to JSONL file (e.g., mcq_set.jsonl, open_end_qa_set.jsonl)
+            episodes: Optional pre-loaded and pre-filtered list of episodes. If provided,
+                      file_path is only used for display purposes and not read again.
 
         Returns:
             List of episode results, each containing:
@@ -304,12 +299,13 @@ Answers:"""
         print(f"Processing: {file_name}")
         print(f"{'='*70}")
 
-        # Read all episodes from JSONL file
-        episodes = []
-        with open(file_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                episode_data = json.loads(line.strip())
-                episodes.append(episode_data)
+        # Use pre-loaded episodes if provided, otherwise read from file
+        if episodes is None:
+            episodes = []
+            with open(file_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    episode_data = json.loads(line.strip())
+                    episodes.append(episode_data)
 
         print(f"Total episodes: {len(episodes)}")
         print(f"Max concurrency - Episodes: {self.max_concurrency_episodes}, Questions: {self.max_concurrency_questions}")
