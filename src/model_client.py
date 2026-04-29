@@ -10,7 +10,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, asdict
 import yaml
 
-
 class ModelClient:
     """Unified client for different model providers."""
 
@@ -39,19 +38,21 @@ class ModelClient:
 
         # For vllm server type, override provider
         if server_type == "vllm":
-            self.provider = "vllm"
+            self.provider = "custom"
             # Use host/port from kwargs or config (support both 'host' and 'vllm_host' naming)
-            kwargs.setdefault('host', config.get('vllm_host') or config.get('host', 'localhost'))
-            kwargs.setdefault('port', config.get('vllm_port') or config.get('port', 8000))
+            host = config.get('vllm_host') or config.get('host', 'localhost')
+            port = config.get('vllm_port') or config.get('port', 8000)
+            config["base_url"] = f"http://{host}:{port}/v1"
 
-        self.client = self._initialize_client(**kwargs)
+        self.client = self._initialize_client()
 
-    def _initialize_client(self, **kwargs):
+    def _initialize_client(self):
         """Initialize provider-specific client."""
-        if self.provider == "vllm":
+        if self.provider == "custom":
             from openai import OpenAI
-            base_url = f"http://{kwargs.get('host', 'localhost')}:{kwargs.get('port', 8000)}/v1"
-            return OpenAI(base_url=base_url, api_key="EMPTY", timeout=180.0)
+            base_url = self.config.get("base_url")
+            api_key = self.config.get("api_key", "EMPTY")
+            return OpenAI(base_url=base_url, api_key=api_key, timeout=180.0)
 
         elif self.provider == "openai":
             from openai import OpenAI
@@ -97,7 +98,7 @@ class ModelClient:
         attempt = 0
         while attempt < max_retries:
             try:
-                if self.provider in ["vllm", "deepseek"]:
+                if self.provider in ["custom", "deepseek"]:
                     response = self.client.chat.completions.create(
                         model=self.model,
                         messages=[{"role": "user", "content": prompt}],
