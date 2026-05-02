@@ -6,9 +6,8 @@ from typing import Any, Dict, List, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
-from src.model_client import ModelClient
-from src.method_register import get_method, list_methods
-from src.method.base_method import BaseMethod
+from model_client import ModelClient
+from method_register import get_method
 from utils.extract_final_answer import extract_final_answer
 from utils.embedding import EmbeddingEngine
 

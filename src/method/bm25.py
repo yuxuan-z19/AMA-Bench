@@ -16,20 +16,21 @@
 BM25 Method - Uses BM25 retrieval for memory construction and retrieval
 """
 
-from typing import Any, Dict, List
+from dataclasses import dataclass
+from typing import Any, List, override
 
 from rank_bm25 import BM25Okapi
 
-from src.method.base_method import BaseMethod
+from .base import BaseMemory, BaseMethod
 
 
-class BM25Memory:
+@dataclass
+class BM25Memory(BaseMemory):
     """Memory object for BM25 method"""
 
-    def __init__(self, documents: List[str], bm25_index: BM25Okapi, corpus_tokens: List[List[str]]):
-        self.documents = documents
-        self.bm25_index = bm25_index
-        self.corpus_tokens = corpus_tokens
+    documents: List[str]
+    bm25_index: BM25Okapi
+    corpus_tokens: List[List[str]]
 
 
 class BM25Method(BaseMethod):
@@ -55,8 +56,8 @@ class BM25Method(BaseMethod):
             top_k = config.get('top_k', top_k)
 
         self.top_k = top_k
-        self.embedding_engine = embedding_engine  # Not used, for compatibility
 
+    @override
     def memory_construction(self, traj_text: str, task: str = "") -> BM25Memory:
         """
         Build BM25 index from trajectory text.
@@ -97,6 +98,7 @@ class BM25Method(BaseMethod):
 
         return BM25Memory(documents, bm25_index, corpus_tokens)
 
+    @override
     def memory_retrieve(self, memory: BM25Memory, question: str) -> str:
         """
         Retrieve relevant documents using BM25.

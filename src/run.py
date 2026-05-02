@@ -9,10 +9,10 @@ from datetime import datetime
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.memory_interface import MemoryQAInterface
-from src.model_client import ModelClient
-from src.method_register import list_methods
-from src.evaluate import evaluate_batch, print_evaluation_summary
+from memory_interface import MemoryQAInterface
+from model_client import ModelClient
+from method_register import list_methods
+from evaluate import evaluate_batch, print_evaluation_summary
 from utils.embedding import EmbeddingEngine
 
 

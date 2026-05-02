@@ -5,18 +5,19 @@ This method does not call any embedding service and is suitable for offline or
 network-restricted runs.
 """
 
-from typing import Any, List, Optional, Tuple, Union
+from dataclasses import dataclass
+from typing import Any, List, Optional, Tuple, Union, override
 import yaml
 from pathlib import Path
 
-from src.method.base_method import BaseMethod
+from .base import BaseMemory, BaseMethod
 
 
-class LongContextMemory:
+@dataclass
+class LongContextMemory(BaseMemory):
     """Memory object for long context method - simply stores the full text"""
 
-    def __init__(self, full_text: str):
-        self.full_text = full_text
+    full_text: str
 
 
 class LongContextMethod(BaseMethod):
@@ -28,7 +29,7 @@ class LongContextMethod(BaseMethod):
     Does not require embeddings or network access for memory construction/retrieval.
     """
 
-    def __init__(self, config_path: str = None, embedding_engine: Any = None):
+    def __init__(self, config_path: str | None = None, embedding_engine: Any | None = None):
         """
         Initialize long context method.
 
@@ -68,8 +69,6 @@ class LongContextMethod(BaseMethod):
                     self.tokenizer = AutoTokenizer.from_pretrained(model_path)
                 except Exception:
                     self.tokenizer = None
-
-        self.embedding_engine = embedding_engine  # Not used, for compatibility
 
     def _load_config(self, config_path: str) -> dict:
         with open(Path(config_path), 'r') as f:
@@ -126,6 +125,7 @@ class LongContextMethod(BaseMethod):
         #print(f"  Prompt tokens {token_count} exceed limit {max_allowed}; truncated to {truncated_len} tokens.")
         return truncated_prompt, truncated_len
 
+    @override
     def memory_construction(self, traj_text: str, task: str = "") -> LongContextMemory:
         full_text = traj_text
         if task:
@@ -137,6 +137,7 @@ class LongContextMethod(BaseMethod):
             )
         return LongContextMemory(full_text)
 
+    @override
     def memory_retrieve(
         self,
         memory: LongContextMemory,

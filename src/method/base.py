@@ -6,12 +6,23 @@ All methods in src/method should inherit from this base class and implement:
 2. memory_retrieve: Retrieve relevant memory information for a question
 """
 
-from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
-from pathlib import Path
 import json
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict
+
 import yaml
 
+
+@dataclass
+class BaseMemory:
+    """
+    Base class for memory objects.
+    This class can be extended to define specific memory structures for different methods.
+    """
+    
+    pass
 
 class BaseMethod(ABC):
     """
@@ -44,7 +55,7 @@ class BaseMethod(ABC):
         return {}
 
     @abstractmethod
-    def memory_construction(self, traj_text: str, task: str = "") -> Any:
+    def memory_construction(self, traj_text: str, task: str = "") -> BaseMemory:
         """
         Build memory from string-formatted trajectory.
 
@@ -58,7 +69,7 @@ class BaseMethod(ABC):
         pass
 
     @abstractmethod
-    def memory_retrieve(self, memory: Any, question: str) -> str:
+    def memory_retrieve(self, memory: BaseMemory, question: str) -> str:
         """
         Retrieve relevant memory information for a question.
 

@@ -2,13 +2,9 @@
 Method Registry - Register and retrieve different memory methods
 """
 
-from typing import Dict, Type, Any, Optional
+from typing import Dict, Type, List
 
-from src.method.base_method import BaseMethod
-from src.method.bm25 import BM25Method
-from src.method.embedding_mem import EmbeddingMethod
-from src.method.longcontext import LongContextMethod
-from src.method.ama_agent import AMAAgentMethod
+from method import *
 
 import inspect
 
@@ -65,7 +61,7 @@ def get_method(name: str, **kwargs) -> BaseMethod:
     return method_class(**filtered_kwargs)
 
 
-def list_methods() -> list:
+def list_methods() -> List[str]:
     """
     List all registered methods.
 

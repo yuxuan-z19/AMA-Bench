@@ -2,7 +2,8 @@
 Embedding-based Memory Method - Uses semantic embeddings for memory construction and retrieval
 """
 
-from typing import Any, List
+from dataclasses import dataclass
+from typing import Any, Dict, List, override
 import numpy as np
 
 try:
@@ -18,23 +19,18 @@ try:
 except ImportError:
     TRANSFORMERS_AVAILABLE = False
 
-from src.method.base_method import BaseMethod
+from .base import BaseMemory, BaseMethod
+from utils.embedding import EmbeddingEngine
 
 
-class EmbeddingMemory:
+@dataclass
+class EmbeddingMemory(BaseMemory):
     """Memory object for embedding-based method"""
 
-    def __init__(
-        self,
-        documents: List[str],
-        embeddings: np.ndarray,
-        index: Any = None,
-        embedding_model: str = None,
-    ):
-        self.documents = documents
-        self.embeddings = embeddings
-        self.index = index  # FAISS index if available
-        self.embedding_model = embedding_model
+    documents: List[str]
+    embeddings: np.ndarray
+    embedding_model: str
+    index: faiss.IndexFlatIP | None = None  # FAISS index if available
 
 
 class EmbeddingMethod(BaseMethod):
@@ -51,7 +47,7 @@ class EmbeddingMethod(BaseMethod):
         top_k: int = 5,
         use_faiss: bool = True,
         config_path: str = None,
-        embedding_engine: Any = None,
+        embedding_engine: EmbeddingEngine = None,
     ):
         """
         Initialize embedding method.
@@ -70,7 +66,7 @@ class EmbeddingMethod(BaseMethod):
             top_k = config.get('top_k', top_k)
             use_faiss = config.get('use_faiss', use_faiss)
 
-        self.embedding_model_name = embedding_model
+        self.embedding_model = embedding_model
         self.top_k = top_k
         self.use_faiss = use_faiss and FAISS_AVAILABLE
         self.embedding_engine = embedding_engine
@@ -88,7 +84,7 @@ class EmbeddingMethod(BaseMethod):
                 )
 
             self.tokenizer = AutoTokenizer.from_pretrained(embedding_model)
-            self.model = AutoModel.from_pretrained(embedding_model)
+            self.model: torch.nn.Module = AutoModel.from_pretrained(embedding_model)
             self.model.eval()
 
     def _encode_text(self, texts: List[str]) -> np.ndarray:
@@ -110,7 +106,7 @@ class EmbeddingMethod(BaseMethod):
 
         for text in texts:
             # Tokenize
-            inputs = self.tokenizer(
+            inputs: Dict[str, torch.Tensor] = self.tokenizer(
                 text, padding=True, truncation=True, max_length=512, return_tensors="pt"
             )
 
@@ -130,6 +126,7 @@ class EmbeddingMethod(BaseMethod):
 
         return np.vstack(embeddings)
 
+    @override
     def memory_construction(self, traj_text: str, task: str = "") -> EmbeddingMemory:
         """
         Build embedding index from trajectory text.
@@ -181,8 +178,9 @@ class EmbeddingMethod(BaseMethod):
             faiss.normalize_L2(embeddings)
             index.add(embeddings)
 
-        return EmbeddingMemory(documents, embeddings, index, self.embedding_model_name)
+        return EmbeddingMemory(documents, embeddings, self.embedding_model, index)
 
+    @override
     def memory_retrieve(self, memory: EmbeddingMemory, question: str) -> str:
         """
         Retrieve relevant documents using semantic similarity.

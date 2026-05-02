@@ -295,19 +295,48 @@ Both include trajectory generation, automatic QA pair creation via state trackin
 Create a subclass of `BaseMethod` and implement both stages:
 
 ```python
-from src.method.base_method import BaseMethod
+from typing import override
+from dataclasses import dataclass
+
+from .base import BaseMemory, BaseMethod
+
+@dataclass
+class MyMemory(BaseMemory):
+    # Define your memory object structure here
+    ...
 
 class MyMethod(BaseMethod):
-    def memory_construction(self, traj_text: str, task: str = ""):
+    
+    @override
+    def memory_construction(self, traj_text: str, task: str = "") -> MyMemory:
         # Build and return a memory object from the trajectory
         ...
 
+    @override
     def memory_retrieve(self, memory, question: str) -> str:
         # Return relevant context string for the question
         ...
 ```
 
-Then register it in [src/method_register.py](src/method_register.py) to make it available via `--method`.
+Add your method implementation in `method/__init__.py` to make it importable:
+
+```python
+from .my_method import MyMethod
+```
+
+Then register it in [src/method_register.py](src/method_register.py) by modifying `_METHOD_REGISTRY` to make it available via `--method`.
+
+```python
+from method import *
+
+# Registry of available methods
+_METHOD_REGISTRY: Dict[str, Type[BaseMethod]] = {
+    "bm25": BM25Method,
+    "embedding": EmbeddingMethod,
+    "longcontext": LongContextMethod,
+    "ama_agent": AMAAgentMethod,
+}
+```
 
 ---
 
