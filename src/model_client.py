@@ -54,7 +54,7 @@ class ModelClient:
 
             base_url = self.config.get("base_url")
             api_key = self.config.get("api_key", "EMPTY")
-            return OpenAI(base_url=base_url, api_key=api_key, timeout=180.0)
+            return OpenAI(base_url=base_url, api_key=api_key, timeout=100000.0)
 
         elif self.provider == "openai":
             from openai import OpenAI
