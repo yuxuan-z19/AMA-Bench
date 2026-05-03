@@ -338,7 +338,7 @@ def _process_trajectory_causal(
     task: str,
     session_size: int,
     call_llm_func: Optional[Callable]
-) -> tuple:
+) -> tuple[Optional[str], Optional[List[Dict[str, Any]]]]:
     """
     Process trajectory to extract both state memory and causal graph.
 

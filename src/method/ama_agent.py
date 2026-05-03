@@ -6,7 +6,7 @@ This module provides two key functions:
 2. memory_retrieve: Retrieve relevant context for answering questions
 """
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, override
+from typing import Any, Dict, List, override
 
 from .base import *
 from .ama_agent_core.construct import construct_state_memory
@@ -26,11 +26,11 @@ class AMAAgentConfig(BaseConfig):
 class AMAAgentMemory(BaseMemory):
     """Memory object for AMA-Agent method"""
 
-    state_mem: Any
-    text_mem: Any
+    state_mem: str
+    text_mem: Dict[str, Any]
     trajectory: str
-    causal_graph: Any = None # None if causal=False
-    embed_mem: Any = None # None if embedding_engine not provided
+    causal_graph: List[Dict[str, Any]] = None # None if causal=False
+    embed_mem: Dict[str, Any] = None # None if embedding_engine not provided
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> 'AMAAgentMemory':
