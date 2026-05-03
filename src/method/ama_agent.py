@@ -5,22 +5,25 @@ This module provides two key functions:
 1. memory_construction: Build state memory from trajectory
 2. memory_retrieve: Retrieve relevant context for answering questions
 """
+
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, override
 
-from .base import *
 from .ama_agent_core.construct import construct_state_memory
 from .ama_agent_core.retrieve import memory_retrieve as _do_retrieve
+from .base import *
 
 
 @dataclass
 class AMAAgentConfig(BaseConfig):
     """Configuration for AMA-Agent method"""
+
     temperature: float = 0
     chunk_size: int = 2048
     session_size: int = 16384
     top_k: int = 5
     causal: bool = False
+
 
 @dataclass
 class AMAAgentMemory(BaseMemory):
@@ -29,12 +32,13 @@ class AMAAgentMemory(BaseMemory):
     state_mem: str
     text_mem: Dict[str, Any]
     trajectory: str
-    causal_graph: List[Dict[str, Any]] = None # None if causal=False
-    embed_mem: Dict[str, Any] = None # None if embedding_engine not provided
+    causal_graph: List[Dict[str, Any]] = None  # None if causal=False
+    embed_mem: Dict[str, Any] = None  # None if embedding_engine not provided
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> 'AMAAgentMemory':
+    def from_dict(cls, d: Dict[str, Any]) -> "AMAAgentMemory":
         return cls(**d)
+
 
 class AMAAgentMethod(BaseMethod):
     """
@@ -50,42 +54,42 @@ class AMAAgentMethod(BaseMethod):
         self,
         config_path: os.PathLike = None,
         client: ModelClient = None,
-        embedding_engine: EmbeddingEngine = None
+        embedding_engine: EmbeddingEngine = None,
     ):
-        super().__init__(config_path=config_path, client=client, embedding_engine=embedding_engine)
+        super().__init__(
+            config_path=config_path, client=client, embedding_engine=embedding_engine
+        )
 
         self.config = self._parse_config()
 
         # max_tokens and max_model_length come from the LLM config, not method config
-        llm_cfg = client.config if (client is not None and hasattr(client, 'config')) else {}
-        vllm_launch = llm_cfg.get('vllm_launch', {})
-        self.max_tokens = (
-            llm_cfg.get('max_tokens')
-            or vllm_launch.get('max_response_len', 8192)
+        llm_cfg = (
+            client.config if (client is not None and hasattr(client, "config")) else {}
         )
-        self.max_model_length = (
-            llm_cfg.get('max_model_len')
-            or vllm_launch.get('max_model_len', 131072)
+        vllm_launch = llm_cfg.get("vllm_launch", {})
+        self.max_tokens = llm_cfg.get("max_tokens") or vllm_launch.get(
+            "max_response_len", 8192
+        )
+        self.max_model_length = llm_cfg.get("max_model_len") or vllm_launch.get(
+            "max_model_len", 131072
         )
 
     def _call_llm(self, prompt: str) -> tuple:
         """Synchronous LLM call using the provided client."""
         response = self.client.query(
-                prompt,
-                temperature=self.config.temperature,
-                max_tokens=self.max_tokens
-            )
-        return None, response 
+            prompt, temperature=self.config.temperature, max_tokens=self.max_tokens
+        )
+        return None, response
 
     @override
     def _parse_config(self) -> AMAAgentConfig:
         config_dict = self._load_config(self.config_path)
         return AMAAgentConfig(
-            temperature=config_dict.get('temperature'),
-            chunk_size=config_dict.get('chunk_size'),
-            session_size=config_dict.get('session_size'),
-            top_k=config_dict.get('top_k'),
-            causal=config_dict.get('causal')
+            temperature=config_dict.get("temperature"),
+            chunk_size=config_dict.get("chunk_size"),
+            session_size=config_dict.get("session_size"),
+            top_k=config_dict.get("top_k"),
+            causal=config_dict.get("causal"),
         )
 
     @override
@@ -112,7 +116,7 @@ class AMAAgentMethod(BaseMethod):
             chunk_size=self.config.chunk_size,
             session_size=self.config.session_size,
             embed_engine=self.embedding_engine,
-            causal=self.config.causal
+            causal=self.config.causal,
         )
         return AMAAgentMemory.from_dict(memory_data)
 

@@ -7,19 +7,25 @@ network-restricted runs.
 
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union, override
+
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
 from utils.embedding import EmbeddingEngine
 
 from .base import *
 
+
 @dataclass
 class LongContextConfig(BaseConfig):
     """Configuration for LongContextMethod"""
-    max_model_length: int = 16384 # Model's maximum context length
-    max_response_tokens: int = 4096 # Reserved for response
-    model_name: str = None # Tokenizer model name (optional, for token counting and truncation)
-    safety_buffer: int = 300 # Fixed overhead for prompt template/formatting tokens
+
+    max_model_length: int = 16384  # Model's maximum context length
+    max_response_tokens: int = 4096  # Reserved for response
+    model_name: str = (
+        None  # Tokenizer model name (optional, for token counting and truncation)
+    )
+    safety_buffer: int = 300  # Fixed overhead for prompt template/formatting tokens
+
 
 @dataclass
 class LongContextMemory(BaseMemory):
@@ -37,17 +43,15 @@ class LongContextMethod(BaseMethod):
     Does not require embeddings or network access for memory construction/retrieval.
     """
 
-    def __init__(self, config_path: os.PathLike = None, embedding_engine: EmbeddingEngine = None):
+    def __init__(self, config_path: os.PathLike = None):
         """
         Initialize long context method.
 
         Args:
             config_path: Path to configuration file (optional)
                         Config can specify: max_model_length, max_response_tokens
-            embedding_engine: Optional embedding engine (ignored by LongContext;
-                              kept only for API compatibility)
         """
-        super().__init__(config_path=config_path, embedding_engine=embedding_engine)
+        super().__init__(config_path=config_path)
 
         self.config = self._parse_config()
         self.tokenizer = self._load_tokenizer(self.config.model_name)
@@ -55,14 +59,18 @@ class LongContextMethod(BaseMethod):
     @override
     def _parse_config(self) -> LongContextConfig:
         config_dict = self._load_config(self.config_path)
-        vllm_launch_dict: Dict[str, Any] = config_dict.get('vllm_launch', {})
-        
-        max_model_length = config_dict.get("max_model_length") or vllm_launch_dict.get("max_model_len")
-        max_response_tokens = config_dict.get("max_response_tokens") or vllm_launch_dict.get("max_response_len")
+        vllm_launch_dict: Dict[str, Any] = config_dict.get("vllm_launch", {})
+
+        max_model_length = config_dict.get("max_model_length") or vllm_launch_dict.get(
+            "max_model_len"
+        )
+        max_response_tokens = config_dict.get(
+            "max_response_tokens"
+        ) or vllm_launch_dict.get("max_response_len")
         model_path = config_dict.get("model")
 
         return LongContextConfig(max_model_length, max_response_tokens, model_path)
-    
+
     def _load_tokenizer(self, model_name: str = None) -> PreTrainedTokenizerBase | None:
         if model_name is None:
             return None
@@ -80,7 +88,9 @@ class LongContextMethod(BaseMethod):
         except Exception:
             return None
 
-    def truncate_prompt(self, prompt: str, target_length: Optional[int] = None) -> Tuple[str, Optional[int]]:
+    def truncate_prompt(
+        self, prompt: str, target_length: Optional[int] = None
+    ) -> Tuple[str, Optional[int]]:
         """Truncate prompt to fit within the context window.
 
         Keeps the first 70% and last 30% of the allowed budget so that
@@ -92,7 +102,11 @@ class LongContextMethod(BaseMethod):
         if target_length is not None:
             max_allowed = target_length
         elif self.config.max_model_length is not None:
-            max_allowed = self.config.max_model_length - self.config.max_response_tokens - self.config.safety_buffer
+            max_allowed = (
+                self.config.max_model_length
+                - self.config.max_response_tokens
+                - self.config.safety_buffer
+            )
         else:
             return prompt, None
 
@@ -114,12 +128,14 @@ class LongContextMethod(BaseMethod):
             truncated_ids = truncated_ids + token_ids[-tail_tokens:]
 
         try:
-            truncated_prompt = self.tokenizer.decode(truncated_ids, skip_special_tokens=True)
+            truncated_prompt = self.tokenizer.decode(
+                truncated_ids, skip_special_tokens=True
+            )
         except Exception:
             truncated_prompt = self.tokenizer.decode(truncated_ids)
 
         truncated_len = len(self._encode_prompt_tokens(truncated_prompt) or []) or None
-        #print(f"  Prompt tokens {token_count} exceed limit {max_allowed}; truncated to {truncated_len} tokens.")
+        # print(f"  Prompt tokens {token_count} exceed limit {max_allowed}; truncated to {truncated_len} tokens.")
         return truncated_prompt, truncated_len
 
     @override
@@ -170,16 +186,17 @@ class LongContextMethod(BaseMethod):
             target = (
                 self.config.max_model_length
                 - self.config.max_response_tokens
-                - self.config .safety_buffer
+                - self.config.safety_buffer
                 - question_overhead
             )
-            truncated, _ = self.truncate_prompt(memory.full_text, target_length=max(100, target))
+            truncated, _ = self.truncate_prompt(
+                memory.full_text, target_length=max(100, target)
+            )
             return truncated
 
         # --- List mode: build the complete create_long_context_prompt-style prompt ---
         questions_block = "\n".join(
-            f"Question {i}: {q}\n"
-            for i, q in enumerate(questions, 1)
+            f"Question {i}: {q}\n" for i, q in enumerate(questions, 1)
         )
 
         if mcq_mode:
@@ -204,8 +221,7 @@ class LongContextMethod(BaseMethod):
             )
             instructions = "Please provide answers in the following format:"
             answer_slots = "\n".join(
-                f"Answer[{i}]: [your answer here]"
-                for i in range(1, len(questions) + 1)
+                f"Answer[{i}]: [your answer here]" for i in range(1, len(questions) + 1)
             )
 
         suffix = (
@@ -224,5 +240,7 @@ class LongContextMethod(BaseMethod):
             - self.config.safety_buffer
             - suffix_overhead
         )
-        truncated_context, _ = self.truncate_prompt(memory.full_text, target_length=max(100, target))
+        truncated_context, _ = self.truncate_prompt(
+            memory.full_text, target_length=max(100, target)
+        )
         return truncated_context + suffix

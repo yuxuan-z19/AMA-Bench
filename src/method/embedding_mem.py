@@ -4,30 +4,36 @@ Embedding-based Memory Method - Uses semantic embeddings for memory construction
 
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple, override
-from gguf import Optional
+
 import numpy as np
+from gguf import Optional
 from transformers import PreTrainedModel, PreTrainedTokenizerBase
 from transformers.modeling_outputs import BaseModelOutput
 
 try:
     import faiss
+
     FAISS_AVAILABLE = True
 except ImportError:
     FAISS_AVAILABLE = False
 
 try:
     import torch
-    from transformers import AutoTokenizer, AutoModel
+    from transformers import AutoModel, AutoTokenizer
+
     TRANSFORMERS_AVAILABLE = True
 except ImportError:
     TRANSFORMERS_AVAILABLE = False
 
-from .base import *
 from utils.embedding import EmbeddingEngine
+
+from .base import *
+
 
 @dataclass
 class EmbeddingConfig(BaseConfig):
     """Configuration for embedding-based method"""
+
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     top_k: int = 5
     use_faiss: bool = True
@@ -54,7 +60,9 @@ class EmbeddingMethod(BaseMethod):
     Supports both FAISS (if available) and simple cosine similarity.
     """
 
-    def __init__(self, config_path: os.PathLike = None, embedding_engine: EmbeddingEngine = None):
+    def __init__(
+        self, config_path: os.PathLike = None, embedding_engine: EmbeddingEngine = None
+    ):
         """
         Initialize embedding method.
 
@@ -68,21 +76,25 @@ class EmbeddingMethod(BaseMethod):
         super().__init__(config_path=config_path, embedding_engine=embedding_engine)
         self.config = self._parse_config()
 
-        self.tokenizer, self.model = self._load_embedding_model(self.config.embedding_model)
+        self.tokenizer, self.model = self._load_embedding_model(
+            self.config.embedding_model
+        )
 
     @override
     def _parse_config(self):
         config_dict = self._load_config(self.config_path)
         return EmbeddingConfig(
-            embedding_model=config_dict.get('embedding_model'),
-            top_k=config_dict.get('top_k'),
-            use_faiss=config_dict.get('use_faiss')
+            embedding_model=config_dict.get("embedding_model"),
+            top_k=config_dict.get("top_k"),
+            use_faiss=config_dict.get("use_faiss"),
         )
 
-    def _load_embedding_model(self, model_name: str) -> Tuple[Optional[PreTrainedTokenizerBase], Optional[PreTrainedModel]]:
+    def _load_embedding_model(
+        self, model_name: str
+    ) -> Tuple[Optional[PreTrainedTokenizerBase], Optional[PreTrainedModel]]:
         if model_name is None:
             return None, None
-        
+
         if not TRANSFORMERS_AVAILABLE:
             raise ImportError(
                 "transformers and torch are required for EmbeddingMethod. "
@@ -90,7 +102,9 @@ class EmbeddingMethod(BaseMethod):
             )
 
         try:
-            tokenizer: PreTrainedTokenizerBase = AutoTokenizer.from_pretrained(model_name)
+            tokenizer: PreTrainedTokenizerBase = AutoTokenizer.from_pretrained(
+                model_name
+            )
             model: PreTrainedModel = AutoModel.from_pretrained(model_name)
             model.eval()
             return tokenizer, model
@@ -127,7 +141,9 @@ class EmbeddingMethod(BaseMethod):
             # Use mean pooling
             attention_mask = inputs["attention_mask"]
             token_embeddings = outputs.last_hidden_state
-            input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+            input_mask_expanded = (
+                attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+            )
             sum_embeddings = torch.sum(token_embeddings * input_mask_expanded, 1)
             sum_mask = torch.clamp(input_mask_expanded.sum(1), min=1e-9)
             embedding = sum_embeddings / sum_mask
@@ -155,25 +171,28 @@ class EmbeddingMethod(BaseMethod):
 
         # Split trajectory into documents (one per turn)
         documents = []
-        lines = full_text.split('\n')
+        lines = full_text.split("\n")
 
         current_turn = []
         for line in lines:
-            if line.strip().startswith('Turn ') or line.strip().startswith('Step '):
+            if line.strip().startswith("Turn ") or line.strip().startswith("Step "):
                 if current_turn:
-                    documents.append('\n'.join(current_turn))
+                    documents.append("\n".join(current_turn))
                     current_turn = []
             current_turn.append(line)
 
         # Add the last turn
         if current_turn:
-            documents.append('\n'.join(current_turn))
+            documents.append("\n".join(current_turn))
 
         # If no turns found, split by chunks
         if not documents:
             # Split into chunks of ~500 characters
             chunk_size = 500
-            documents = [full_text[i : i + chunk_size] for i in range(0, len(full_text), chunk_size)]
+            documents = [
+                full_text[i : i + chunk_size]
+                for i in range(0, len(full_text), chunk_size)
+            ]
 
         # Encode documents to embeddings
         embeddings = self._encode_text(documents)
@@ -182,7 +201,9 @@ class EmbeddingMethod(BaseMethod):
         index = None
         if self.config.use_faiss:
             dimension = embeddings.shape[1]
-            index = faiss.IndexFlatIP(dimension)  # Inner product (cosine similarity after normalization)
+            index = faiss.IndexFlatIP(
+                dimension
+            )  # Inner product (cosine similarity after normalization)
 
             # Normalize embeddings for cosine similarity
             faiss.normalize_L2(embeddings)
@@ -217,7 +238,9 @@ class EmbeddingMethod(BaseMethod):
         else:
             # Use simple cosine similarity
             # Normalize embeddings
-            question_norm = question_embedding / (np.linalg.norm(question_embedding) + 1e-9)
+            question_norm = question_embedding / (
+                np.linalg.norm(question_embedding) + 1e-9
+            )
             doc_norms = memory.embeddings / (
                 np.linalg.norm(memory.embeddings, axis=1, keepdims=True) + 1e-9
             )
@@ -229,7 +252,9 @@ class EmbeddingMethod(BaseMethod):
             top_indices = np.argsort(similarities)[::-1][: self.config.top_k].tolist()
 
         # Get top documents
-        retrieved_docs = [memory.documents[i] for i in top_indices if i < len(memory.documents)]
+        retrieved_docs = [
+            memory.documents[i] for i in top_indices if i < len(memory.documents)
+        ]
 
         # Concatenate retrieved documents
         retrieved_context = "\n\n".join(retrieved_docs)

@@ -23,9 +23,11 @@ from rank_bm25 import BM25Okapi
 
 from .base import *
 
+
 @dataclass
 class BM25Config(BaseConfig):
     """Configuration for BM25 method"""
+
     top_k: int = 5
 
 
@@ -45,7 +47,7 @@ class BM25Method(BaseMethod):
     Uses BM25 (Best Matching 25) ranking function to retrieve relevant trajectory segments.
     """
 
-    def __init__(self, config_path: os.PathLike = None, embedding_engine: EmbeddingEngine = None):
+    def __init__(self, config_path: os.PathLike = None):
         """
         Initialize BM25 method.
 
@@ -55,7 +57,7 @@ class BM25Method(BaseMethod):
             embedding_engine: Optional embedding engine (not used by BM25, for compatibility)
         """
 
-        super().__init__(config_path=config_path, embedding_engine=embedding_engine)
+        super().__init__(config_path=config_path)
         self.config = self._parse_config()
 
     @override
@@ -78,19 +80,19 @@ class BM25Method(BaseMethod):
         # Split trajectory into documents (one per turn)
         # Each turn is separated by double newline
         documents = []
-        lines = traj_text.split('\n')
+        lines = traj_text.split("\n")
 
         current_turn = []
         for line in lines:
-            if line.strip().startswith('Turn ') or line.strip().startswith('Step '):
+            if line.strip().startswith("Turn ") or line.strip().startswith("Step "):
                 if current_turn:
-                    documents.append('\n'.join(current_turn))
+                    documents.append("\n".join(current_turn))
                     current_turn = []
             current_turn.append(line)
 
         # Add the last turn
         if current_turn:
-            documents.append('\n'.join(current_turn))
+            documents.append("\n".join(current_turn))
 
         # If no turns found, treat entire text as one document
         if not documents:
@@ -124,7 +126,9 @@ class BM25Method(BaseMethod):
 
         # Retrieve top-k documents using BM25
         scores = memory.bm25_index.get_scores(query_tokens)
-        top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[: self.config.top_k]
+        top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[
+            : self.config.top_k
+        ]
 
         # Get top documents
         retrieved_docs = [memory.documents[i] for i in top_indices]

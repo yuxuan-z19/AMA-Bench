@@ -298,7 +298,12 @@ Create a subclass of `BaseMethod` and implement both stages:
 from typing import override
 from dataclasses import dataclass
 
-from .base import BaseMemory, BaseMethod
+from .base import *
+
+@dataclass
+class MyConfig(BaseConfig):
+    # Define your method configuration here
+    ...
 
 @dataclass
 class MyMemory(BaseMemory):
@@ -306,6 +311,22 @@ class MyMemory(BaseMemory):
     ...
 
 class MyMethod(BaseMethod):
+
+    def __init__(
+        self,
+        config_path: os.PathLike = None,
+        client: ModelClient = None,
+        embedding_engine: EmbeddingEngine = None,
+    ):
+        super().__init__(config_path, client, embedding_engine)
+        self.config = self._parse_config()
+        ...
+
+    @override
+    def _parse_config(self) -> MyConfig:
+        # Load your configuration from the config file in config_path
+        config_dict = self._load_config(self.config_path)
+        ...
     
     @override
     def memory_construction(self, traj_text: str, task: str = "") -> MyMemory:
@@ -335,7 +356,18 @@ _METHOD_REGISTRY: Dict[str, Type[BaseMethod]] = {
     "embedding": EmbeddingMethod,
     "longcontext": LongContextMethod,
     "ama_agent": AMAAgentMethod,
+
+    # Add your own method
+    "mymethod": MyMethod,
 }
+```
+
+## Contributing
+
+We welcome contributions! Please fork the repo, create a new branch for your feature or bug fix, and submit a pull request. Make sure to follow the existing code style and include tests for new functionality.
+
+```bash
+pre-commit install && pre-commit autoupdate
 ```
 
 ---

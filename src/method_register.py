@@ -2,12 +2,10 @@
 Method Registry - Register and retrieve different memory methods
 """
 
-from typing import Dict, Type, List
+import inspect
+from typing import Dict, List, Type
 
 from method import *
-
-import inspect
-
 
 # Registry of available methods
 _METHOD_REGISTRY: Dict[str, Type[BaseMethod]] = {
@@ -27,7 +25,9 @@ def register_method(name: str, method_class: Type[BaseMethod]) -> None:
         method_class: Class implementing BaseMethod interface
     """
     if not issubclass(method_class, BaseMethod):
-        raise ValueError(f"Method class must inherit from BaseMethod, got {method_class}")
+        raise ValueError(
+            f"Method class must inherit from BaseMethod, got {method_class}"
+        )
 
     _METHOD_REGISTRY[name] = method_class
     print(f"✅ Registered method: {name}")
@@ -54,7 +54,7 @@ def get_method(name: str, **kwargs) -> BaseMethod:
     method_class = _METHOD_REGISTRY[name]
 
     # Filter kwargs based on method's __init__ signature
-    
+
     init_params = inspect.signature(method_class.__init__).parameters
     filtered_kwargs = {k: v for k, v in kwargs.items() if k in init_params}
 
