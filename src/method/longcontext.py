@@ -6,12 +6,20 @@ network-restricted runs.
 """
 
 from dataclasses import dataclass
-from typing import Any, List, Optional, Tuple, Union, override
-import yaml
-from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Union, override
+from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
-from .base import BaseMemory, BaseMethod
+from utils.embedding import EmbeddingEngine
 
+from .base import *
+
+@dataclass
+class LongContextConfig(BaseConfig):
+    """Configuration for LongContextMethod"""
+    max_model_length: int = 16384 # Model's maximum context length
+    max_response_tokens: int = 4096 # Reserved for response
+    model_name: str = None # Tokenizer model name (optional, for token counting and truncation)
+    safety_buffer: int = 300 # Fixed overhead for prompt template/formatting tokens
 
 @dataclass
 class LongContextMemory(BaseMemory):
@@ -29,7 +37,7 @@ class LongContextMethod(BaseMethod):
     Does not require embeddings or network access for memory construction/retrieval.
     """
 
-    def __init__(self, config_path: str | None = None, embedding_engine: Any | None = None):
+    def __init__(self, config_path: os.PathLike = None, embedding_engine: EmbeddingEngine = None):
         """
         Initialize long context method.
 
@@ -39,40 +47,29 @@ class LongContextMethod(BaseMethod):
             embedding_engine: Optional embedding engine (ignored by LongContext;
                               kept only for API compatibility)
         """
-        # Default values
-        self.max_model_length = 16384  # Model's maximum context length
-        self.max_response_tokens = 4096  # Reserved for response
-        self.safety_buffer = 300       # Fixed overhead for prompt template/formatting tokens
-        self.tokenizer = None
-        self.requires_embedding = False
-        self.requires_network = False
+        super().__init__(config_path=config_path, embedding_engine=embedding_engine)
 
-        # Load config if provided
-        if config_path:
-            config = self._load_config(config_path)
-            vllm_launch = config.get('vllm_launch', {})
-            self.max_model_length = (
-                config.get('max_model_length')
-                or vllm_launch.get('max_model_len', self.max_model_length)
-            )
-            # Align with the actual max_tokens the client will request
-            self.max_response_tokens = (
-                config.get('max_response_tokens')
-                or vllm_launch.get('max_response_len', self.max_response_tokens)
-            )
+        self.config = self._parse_config()
+        self.tokenizer = self._load_tokenizer(self.config.model_name)
 
-            # Try to load the model's tokenizer for accurate token counting
-            model_path = config.get('model')
-            if model_path:
-                try:
-                    from transformers import AutoTokenizer
-                    self.tokenizer = AutoTokenizer.from_pretrained(model_path)
-                except Exception:
-                    self.tokenizer = None
+    @override
+    def _parse_config(self) -> LongContextConfig:
+        config_dict = self._load_config(self.config_path)
+        vllm_launch_dict: Dict[str, Any] = config_dict.get('vllm_launch', {})
+        
+        max_model_length = config_dict.get("max_model_length") or vllm_launch_dict.get("max_model_len")
+        max_response_tokens = config_dict.get("max_response_tokens") or vllm_launch_dict.get("max_response_len")
+        model_path = config_dict.get("model")
 
-    def _load_config(self, config_path: str) -> dict:
-        with open(Path(config_path), 'r') as f:
-            return yaml.safe_load(f)
+        return LongContextConfig(max_model_length, max_response_tokens, model_path)
+    
+    def _load_tokenizer(self, model_name: str = None) -> PreTrainedTokenizerBase | None:
+        if model_name is None:
+            return None
+        try:
+            return AutoTokenizer.from_pretrained(model_name)
+        except Exception:
+            return None
 
     def _encode_prompt_tokens(self, prompt: str):
         """Return token id list for prompt, or None if tokenizer unavailable."""
@@ -94,8 +91,8 @@ class LongContextMethod(BaseMethod):
         """
         if target_length is not None:
             max_allowed = target_length
-        elif self.max_model_length is not None:
-            max_allowed = self.max_model_length - self.max_response_tokens - self.safety_buffer
+        elif self.config.max_model_length is not None:
+            max_allowed = self.config.max_model_length - self.config.max_response_tokens - self.config.safety_buffer
         else:
             return prompt, None
 
@@ -171,9 +168,9 @@ class LongContextMethod(BaseMethod):
             question_ids = self._encode_prompt_tokens(questions)
             question_overhead = len(question_ids) if question_ids else 0
             target = (
-                self.max_model_length
-                - self.max_response_tokens
-                - self.safety_buffer
+                self.config.max_model_length
+                - self.config.max_response_tokens
+                - self.config .safety_buffer
                 - question_overhead
             )
             truncated, _ = self.truncate_prompt(memory.full_text, target_length=max(100, target))
@@ -222,9 +219,9 @@ class LongContextMethod(BaseMethod):
         suffix_ids = self._encode_prompt_tokens(suffix)
         suffix_overhead = len(suffix_ids) if suffix_ids else 0
         target = (
-            self.max_model_length
-            - self.max_response_tokens
-            - self.safety_buffer
+            self.config.max_model_length
+            - self.config.max_response_tokens
+            - self.config.safety_buffer
             - suffix_overhead
         )
         truncated_context, _ = self.truncate_prompt(memory.full_text, target_length=max(100, target))

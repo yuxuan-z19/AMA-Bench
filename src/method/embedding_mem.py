@@ -3,8 +3,11 @@ Embedding-based Memory Method - Uses semantic embeddings for memory construction
 """
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, override
+from typing import Any, Dict, List, Tuple, override
+from gguf import Optional
 import numpy as np
+from transformers import PreTrainedModel, PreTrainedTokenizerBase
+from transformers.modeling_outputs import BaseModelOutput
 
 try:
     import faiss
@@ -19,8 +22,19 @@ try:
 except ImportError:
     TRANSFORMERS_AVAILABLE = False
 
-from .base import BaseMemory, BaseMethod
+from .base import *
 from utils.embedding import EmbeddingEngine
+
+@dataclass
+class EmbeddingConfig(BaseConfig):
+    """Configuration for embedding-based method"""
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    top_k: int = 5
+    use_faiss: bool = True
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.use_faiss &= FAISS_AVAILABLE
 
 
 @dataclass
@@ -29,7 +43,6 @@ class EmbeddingMemory(BaseMemory):
 
     documents: List[str]
     embeddings: np.ndarray
-    embedding_model: str
     index: faiss.IndexFlatIP | None = None  # FAISS index if available
 
 
@@ -41,14 +54,7 @@ class EmbeddingMethod(BaseMethod):
     Supports both FAISS (if available) and simple cosine similarity.
     """
 
-    def __init__(
-        self,
-        embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
-        top_k: int = 5,
-        use_faiss: bool = True,
-        config_path: str = None,
-        embedding_engine: EmbeddingEngine = None,
-    ):
+    def __init__(self, config_path: os.PathLike = None, embedding_engine: EmbeddingEngine = None):
         """
         Initialize embedding method.
 
@@ -59,33 +65,37 @@ class EmbeddingMethod(BaseMethod):
             config_path: Path to configuration file (optional)
             embedding_engine: Optional external embedding engine (from utils.embedding)
         """
-        # Load config if provided
-        if config_path:
-            config = self._load_config(config_path)
-            embedding_model = config.get('embedding_model', embedding_model)
-            top_k = config.get('top_k', top_k)
-            use_faiss = config.get('use_faiss', use_faiss)
+        super().__init__(config_path=config_path, embedding_engine=embedding_engine)
+        self.config = self._parse_config()
 
-        self.embedding_model = embedding_model
-        self.top_k = top_k
-        self.use_faiss = use_faiss and FAISS_AVAILABLE
-        self.embedding_engine = embedding_engine
+        self.tokenizer, self.model = self._load_embedding_model(self.config.embedding_model)
 
-        # Use external embedding engine if provided
-        if self.embedding_engine is not None:
-            self.tokenizer = None
-            self.model = None
-        else:
-            # Initialize embedding model
-            if not TRANSFORMERS_AVAILABLE:
-                raise ImportError(
-                    "transformers and torch are required for EmbeddingMethod. "
-                    "Install with: pip install transformers torch"
-                )
+    @override
+    def _parse_config(self):
+        config_dict = self._load_config(self.config_path)
+        return EmbeddingConfig(
+            embedding_model=config_dict.get('embedding_model'),
+            top_k=config_dict.get('top_k'),
+            use_faiss=config_dict.get('use_faiss')
+        )
 
-            self.tokenizer = AutoTokenizer.from_pretrained(embedding_model)
-            self.model: torch.nn.Module = AutoModel.from_pretrained(embedding_model)
-            self.model.eval()
+    def _load_embedding_model(self, model_name: str) -> Tuple[Optional[PreTrainedTokenizerBase], Optional[PreTrainedModel]]:
+        if model_name is None:
+            return None, None
+        
+        if not TRANSFORMERS_AVAILABLE:
+            raise ImportError(
+                "transformers and torch are required for EmbeddingMethod. "
+                "Install with: pip install transformers torch"
+            )
+
+        try:
+            tokenizer: PreTrainedTokenizerBase = AutoTokenizer.from_pretrained(model_name)
+            model: PreTrainedModel = AutoModel.from_pretrained(model_name)
+            model.eval()
+            return tokenizer, model
+        except Exception:
+            return None, None
 
     def _encode_text(self, texts: List[str]) -> np.ndarray:
         """
@@ -112,7 +122,7 @@ class EmbeddingMethod(BaseMethod):
 
             # Get embeddings
             with torch.no_grad():
-                outputs = self.model(**inputs)
+                outputs: BaseModelOutput = self.model(**inputs)
 
             # Use mean pooling
             attention_mask = inputs["attention_mask"]
@@ -170,7 +180,7 @@ class EmbeddingMethod(BaseMethod):
 
         # Build FAISS index if enabled
         index = None
-        if self.use_faiss:
+        if self.config.use_faiss:
             dimension = embeddings.shape[1]
             index = faiss.IndexFlatIP(dimension)  # Inner product (cosine similarity after normalization)
 
@@ -178,7 +188,7 @@ class EmbeddingMethod(BaseMethod):
             faiss.normalize_L2(embeddings)
             index.add(embeddings)
 
-        return EmbeddingMemory(documents, embeddings, self.embedding_model, index)
+        return EmbeddingMemory(documents, embeddings, index)
 
     @override
     def memory_retrieve(self, memory: EmbeddingMemory, question: str) -> str:
@@ -202,7 +212,7 @@ class EmbeddingMethod(BaseMethod):
         if memory.index is not None:
             # Use FAISS index
             faiss.normalize_L2(question_embedding)
-            scores, indices = memory.index.search(question_embedding, self.top_k)
+            scores, indices = memory.index.search(question_embedding, self.config.top_k)
             top_indices = indices[0].tolist()
         else:
             # Use simple cosine similarity
@@ -216,7 +226,7 @@ class EmbeddingMethod(BaseMethod):
             similarities = np.dot(doc_norms, question_norm.T).flatten()
 
             # Get top-k indices
-            top_indices = np.argsort(similarities)[::-1][: self.top_k].tolist()
+            top_indices = np.argsort(similarities)[::-1][: self.config.top_k].tolist()
 
         # Get top documents
         retrieved_docs = [memory.documents[i] for i in top_indices if i < len(memory.documents)]

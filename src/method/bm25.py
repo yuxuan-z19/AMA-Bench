@@ -21,7 +21,12 @@ from typing import Any, List, override
 
 from rank_bm25 import BM25Okapi
 
-from .base import BaseMemory, BaseMethod
+from .base import *
+
+@dataclass
+class BM25Config(BaseConfig):
+    """Configuration for BM25 method"""
+    top_k: int = 5
 
 
 @dataclass
@@ -40,7 +45,7 @@ class BM25Method(BaseMethod):
     Uses BM25 (Best Matching 25) ranking function to retrieve relevant trajectory segments.
     """
 
-    def __init__(self, top_k: int = 5, config_path: str = None, embedding_engine: Any = None):
+    def __init__(self, config_path: os.PathLike = None, embedding_engine: EmbeddingEngine = None):
         """
         Initialize BM25 method.
 
@@ -50,12 +55,13 @@ class BM25Method(BaseMethod):
             embedding_engine: Optional embedding engine (not used by BM25, for compatibility)
         """
 
-        # Load config if provided
-        if config_path:
-            config = self._load_config(config_path)
-            top_k = config.get('top_k', top_k)
+        super().__init__(config_path=config_path, embedding_engine=embedding_engine)
+        self.config = self._parse_config()
 
-        self.top_k = top_k
+    @override
+    def _parse_config(self) -> BM25Config:
+        config_dict = self._load_config(self.config_path)
+        return BM25Config(top_k=config_dict.get("top_k"))
 
     @override
     def memory_construction(self, traj_text: str, task: str = "") -> BM25Memory:
@@ -118,7 +124,7 @@ class BM25Method(BaseMethod):
 
         # Retrieve top-k documents using BM25
         scores = memory.bm25_index.get_scores(query_tokens)
-        top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[: self.top_k]
+        top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[: self.config.top_k]
 
         # Get top documents
         retrieved_docs = [memory.documents[i] for i in top_indices]

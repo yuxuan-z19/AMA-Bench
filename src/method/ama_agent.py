@@ -6,12 +6,21 @@ This module provides two key functions:
 2. memory_retrieve: Retrieve relevant context for answering questions
 """
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, Optional, override
+from typing import Any, Dict, override
 
-from .base import BaseMemory, BaseMethod
+from .base import *
 from .ama_agent_core.construct import construct_state_memory
 from .ama_agent_core.retrieve import memory_retrieve as _do_retrieve
 
+
+@dataclass
+class AMAAgentConfig(BaseConfig):
+    """Configuration for AMA-Agent method"""
+    temperature: float = 0
+    chunk_size: int = 2048
+    session_size: int = 16384
+    top_k: int = 5
+    causal: bool = False
 
 @dataclass
 class AMAAgentMemory(BaseMemory):
@@ -39,19 +48,13 @@ class AMAAgentMethod(BaseMethod):
 
     def __init__(
         self,
-        config_path: Optional[str] = None,
-        client: Optional[Any] = None,
-        embedding_engine: Optional[Any] = None
+        config_path: os.PathLike = None,
+        client: ModelClient = None,
+        embedding_engine: EmbeddingEngine = None
     ):
-        config = self._load_config(config_path)
-        self.temperature = config.get('temperature', 0)
-        self.chunk_size = config.get('chunk_size', 2048)
-        self.session_size = config.get('session_size', 16384)
-        self.top_k = config.get('top_k', 5)
-        self.causal = config.get('causal', False)
+        super().__init__(config_path=config_path, client=client, embedding_engine=embedding_engine)
 
-        self.client = client
-        self.embedding_engine = embedding_engine
+        self.config = self._parse_config()
 
         # max_tokens and max_model_length come from the LLM config, not method config
         llm_cfg = client.config if (client is not None and hasattr(client, 'config')) else {}
@@ -69,10 +72,21 @@ class AMAAgentMethod(BaseMethod):
         """Synchronous LLM call using the provided client."""
         response = self.client.query(
                 prompt,
-                temperature=self.temperature,
+                temperature=self.config.temperature,
                 max_tokens=self.max_tokens
             )
         return None, response 
+
+    @override
+    def _parse_config(self) -> AMAAgentConfig:
+        config_dict = self._load_config(self.config_path)
+        return AMAAgentConfig(
+            temperature=config_dict.get('temperature'),
+            chunk_size=config_dict.get('chunk_size'),
+            session_size=config_dict.get('session_size'),
+            top_k=config_dict.get('top_k'),
+            causal=config_dict.get('causal')
+        )
 
     @override
     def memory_construction(self, traj_text: str, task: str = "") -> AMAAgentMemory:
@@ -95,10 +109,10 @@ class AMAAgentMethod(BaseMethod):
             trajectory_text=traj_text,
             task=task,
             call_llm_func=self._call_llm,
-            chunk_size=self.chunk_size,
-            session_size=self.session_size,
+            chunk_size=self.config.chunk_size,
+            session_size=self.config.session_size,
             embed_engine=self.embedding_engine,
-            causal=self.causal
+            causal=self.config.causal
         )
         return AMAAgentMemory.from_dict(memory_data)
 
@@ -124,7 +138,7 @@ class AMAAgentMethod(BaseMethod):
             memory=asdict(memory),
             question=question,
             call_llm_func=self._call_llm,
-            top_k=self.top_k,
+            top_k=self.config.top_k,
             embed_engine=self.embedding_engine,
             max_context_length=self.max_model_length - self.max_tokens,
         )
