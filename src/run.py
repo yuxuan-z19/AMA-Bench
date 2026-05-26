@@ -138,19 +138,13 @@ Examples:
     )
 
     # Sampling / filtering configuration
-    parser.add_argument(
-        "--samples",
-        type=int,
-        default=None,
-        help="Randomly sample N episodes from the dataset. Cannot be used together with --domains",
-    )
-    parser.add_argument(
-        "--domains",
-        type=str,
-        default=None,
-        help="Comma-separated list of domains to evaluate (e.g. 'embodied_ai,software_engineer'). "
-        "Cannot be used together with --samples",
-    )
+    parser.add_argument("--samples", type=int, default=None,
+                        help="Randomly sample N episodes from the dataset. Cannot be used together with --domains")
+    parser.add_argument("--domains", type=str, default=None,
+                        help="Comma-separated list of domains to evaluate (e.g. 'embodied_ai,software_engineer'). "
+                             "Cannot be used together with --samples")
+    parser.add_argument("--episode-ids", type=str, default=None,
+                        help="Comma-separated episode IDs to evaluate. Cannot be used together with --samples or --domains")
 
     # Output configuration
     parser.add_argument(
@@ -162,11 +156,13 @@ Examples:
 
     args = parser.parse_args()
 
-    # Validate mutual exclusivity of --samples and --domains
-    if args.samples is not None and args.domains is not None:
-        parser.error(
-            "--samples and --domains cannot be used at the same time. Use one or the other."
-        )
+    # Validate mutual exclusivity of episode filtering options
+    active_filters = sum(
+        value is not None
+        for value in (args.samples, args.domains, args.episode_ids)
+    )
+    if active_filters > 1:
+        parser.error("--samples, --domains, and --episode-ids are mutually exclusive. Use one.")
 
     # Auto-configure test file based on test_dir and subset
     if args.test_file is None:
@@ -233,31 +229,28 @@ Examples:
                 embedding_config = method_config_data.get("embedding_engine")
                 if embedding_config and embedding_config is not None:
                     embedding_engine = EmbeddingEngine(
-                        model_name=embedding_config.get("model_name"),
-                        base_url=embedding_config.get("base_url"),
-                        api_key=embedding_config.get("api_key", "EMPTY"),
-                        batch_size=embedding_config.get("batch_size", 8),
-                        max_length=embedding_config.get("max_length", 512),
-                        auto_launch=embedding_config.get("auto_launch", False),
-                        host=embedding_config.get("host", "127.0.0.1"),
-                        port=embedding_config.get("port", 8003),
-                        runner=embedding_config.get("runner", "pooling"),
-                        cuda_visible_devices=embedding_config.get(
-                            "cuda_visible_devices"
-                        ),
-                        tensor_parallel_size=embedding_config.get(
-                            "tensor_parallel_size", 1
-                        ),
-                        gpu_memory_utilization=embedding_config.get(
-                            "gpu_memory_utilization", 0.9
-                        ),
-                        startup_timeout=embedding_config.get("startup_timeout", 120),
-                    )
-                    print(
-                        f"✅ Initialized embedding engine: {embedding_config.get('model_name')}"
+                        model_name=embedding_config.get('model_name'),
+                        base_url=embedding_config.get('base_url'),
+                        api_key=embedding_config.get('api_key', 'EMPTY'),
+                        batch_size=embedding_config.get('batch_size', 8),
+                        max_length=embedding_config.get('max_length', 512),
+                        auto_launch=embedding_config.get('auto_launch', False),
+                        host=embedding_config.get('host', '127.0.0.1'),
+                        port=embedding_config.get('port', 8003),
+                        runner=embedding_config.get('runner', 'pooling'),
+                        cuda_visible_devices=embedding_config.get('cuda_visible_devices'),
+                        tensor_parallel_size=embedding_config.get('tensor_parallel_size', 1),
+                        gpu_memory_utilization=embedding_config.get('gpu_memory_utilization', 0.9),
+                        startup_timeout=embedding_config.get('startup_timeout', 120),
+                        hf_endpoint=embedding_config.get('hf_endpoint'),
+                        max_model_len=embedding_config.get('max_model_len'),
+                        disable_hf_transfer=embedding_config.get('disable_hf_transfer', True),
+                        disable_xet=embedding_config.get('disable_xet', True),
                     )
         except Exception as e:
             print(f"⚠️ Warning: Failed to initialize embedding engine: {e}")
+            if args.method == "memorybank":
+                raise
 
     # Register shutdown hook so the embedding server is stopped on any exit path
     if embedding_engine is not None:
@@ -265,9 +258,9 @@ Examples:
 
         atexit.register(embedding_engine.shutdown)
 
-    # Load and filter episodes (for --samples or --domains)
+    # Load and filter episodes (for --samples, --domains, or --episode-ids)
     filtered_episodes = None
-    if args.samples is not None or args.domains is not None:
+    if args.samples is not None or args.domains is not None or args.episode_ids is not None:
         import random
 
         all_episodes = []
@@ -275,14 +268,17 @@ Examples:
             for line in f:
                 all_episodes.append(json.loads(line.strip()))
 
-        if args.domains is not None:
-            target_domains = {d.strip() for d in args.domains.split(",")}
+        if args.episode_ids is not None:
+            target_episode_ids = {item.strip() for item in args.episode_ids.split(',') if item.strip()}
             filtered_episodes = [
-                ep for ep in all_episodes if ep.get("domain", "") in target_domains
+                ep for ep in all_episodes
+                if str(ep.get('episode_id')) in target_episode_ids
             ]
-            print(
-                f"Filtering by domains {target_domains}: {len(all_episodes)} → {len(filtered_episodes)} episodes"
-            )
+            print(f"Filtering by episode IDs {target_episode_ids}: {len(all_episodes)} → {len(filtered_episodes)} episodes")
+        elif args.domains is not None:
+            target_domains = {d.strip() for d in args.domains.split(',')}
+            filtered_episodes = [ep for ep in all_episodes if ep.get('domain', '') in target_domains]
+            print(f"Filtering by domains {target_domains}: {len(all_episodes)} → {len(filtered_episodes)} episodes")
         elif args.samples is not None:
             if args.samples >= len(all_episodes):
                 filtered_episodes = all_episodes
@@ -324,7 +320,9 @@ Examples:
     print("PHASE 1: GENERATING ANSWERS")
 
     episode_results = interface.run(
-        file_path=args.test_file, episodes=filtered_episodes
+        file_path=args.test_file,
+        episodes=filtered_episodes,
+        incremental_output_path=str(answers_path),
     )
 
     # Save answers to JSONL
