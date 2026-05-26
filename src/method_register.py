@@ -12,7 +12,9 @@ from src.method.ama_agent import AMAAgentMethod
 from src.method.memorybank_method import MemoryBankMethod
 
 import inspect
+from typing import Dict, List, Type
 
+from method import *
 
 # Registry of available methods
 _METHOD_REGISTRY: Dict[str, Type[BaseMethod]] = {
@@ -33,7 +35,9 @@ def register_method(name: str, method_class: Type[BaseMethod]) -> None:
         method_class: Class implementing BaseMethod interface
     """
     if not issubclass(method_class, BaseMethod):
-        raise ValueError(f"Method class must inherit from BaseMethod, got {method_class}")
+        raise ValueError(
+            f"Method class must inherit from BaseMethod, got {method_class}"
+        )
 
     _METHOD_REGISTRY[name] = method_class
     print(f"✅ Registered method: {name}")
@@ -60,14 +64,14 @@ def get_method(name: str, **kwargs) -> BaseMethod:
     method_class = _METHOD_REGISTRY[name]
 
     # Filter kwargs based on method's __init__ signature
-    
+
     init_params = inspect.signature(method_class.__init__).parameters
     filtered_kwargs = {k: v for k, v in kwargs.items() if k in init_params}
 
     return method_class(**filtered_kwargs)
 
 
-def list_methods() -> list:
+def list_methods() -> List[str]:
     """
     List all registered methods.
 

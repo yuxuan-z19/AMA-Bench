@@ -1,8 +1,9 @@
-from typing import List, Optional
-import numpy as np
 import os
 import subprocess
 import time
+from typing import List, Optional
+
+import numpy as np
 
 
 class EmbeddingEngine:
@@ -73,6 +74,7 @@ class EmbeddingEngine:
         """Return True if the vLLM server is already up and responding."""
         try:
             import urllib.request
+
             with urllib.request.urlopen(self._health_url(), timeout=3) as r:
                 return r.status == 200
         except Exception:
@@ -117,8 +119,10 @@ class EmbeddingEngine:
 
         with open(log_path, "w") as log_f:
             self._server_proc = subprocess.Popen(
-                cmd, env=env,
-                stdout=log_f, stderr=subprocess.STDOUT,
+                cmd,
+                env=env,
+                stdout=log_f,
+                stderr=subprocess.STDOUT,
             )
 
         # Wait for the server to become healthy
@@ -160,7 +164,10 @@ class EmbeddingEngine:
             self._maybe_launch_server()
             try:
                 from openai import OpenAI
-                self.client = OpenAI(base_url=self.base_url, api_key=self.api_key, timeout=120.0)
+
+                self.client = OpenAI(
+                    base_url=self.base_url, api_key=self.api_key, timeout=120.0
+                )
                 self.use_api = True
             except ImportError:
                 raise ImportError(
@@ -171,7 +178,7 @@ class EmbeddingEngine:
             # Use local HuggingFace model
             try:
                 import torch
-                from transformers import AutoTokenizer, AutoModel
+                from transformers import AutoModel, AutoTokenizer
 
                 self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
                 self.model = AutoModel.from_pretrained(self.model_name)
@@ -215,14 +222,13 @@ class EmbeddingEngine:
         _char_limit = self.max_length * 2
 
         for i in range(0, len(texts), self.batch_size):
-            batch = [t[:_char_limit] for t in texts[i:i + self.batch_size]]
+            batch = [t[:_char_limit] for t in texts[i : i + self.batch_size]]
             last_exc = None
             current_char_limit = _char_limit
             for attempt in range(max_retries):
                 try:
                     response = self.client.embeddings.create(
-                        input=batch,
-                        model=self.model_name
+                        input=batch, model=self.model_name
                     )
                     last_exc = None
                     break
@@ -231,9 +237,12 @@ class EmbeddingEngine:
                     # 400 means token limit exceeded: truncate harder and retry immediately
                     if BadRequestError is not None and isinstance(e, BadRequestError):
                         current_char_limit = current_char_limit // 2
-                        batch = [t[:current_char_limit] for t in texts[i:i + self.batch_size]]
+                        batch = [
+                            t[:current_char_limit]
+                            for t in texts[i : i + self.batch_size]
+                        ]
                     elif attempt < max_retries - 1:
-                        time.sleep(2 ** attempt)
+                        time.sleep(2**attempt)
             if last_exc is not None:
                 raise last_exc
             batch_embeddings = [item.embedding for item in response.data]
@@ -248,14 +257,14 @@ class EmbeddingEngine:
         embeddings = []
 
         for i in range(0, len(texts), self.batch_size):
-            batch = texts[i:i + self.batch_size]
+            batch = texts[i : i + self.batch_size]
 
             inputs = self.tokenizer(
                 batch,
                 padding=True,
                 truncation=True,
                 max_length=self.max_length,
-                return_tensors="pt"
+                return_tensors="pt",
             )
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
@@ -264,7 +273,9 @@ class EmbeddingEngine:
 
             attention_mask = inputs["attention_mask"]
             token_embeddings = outputs.last_hidden_state
-            input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+            input_mask_expanded = (
+                attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+            )
             sum_embeddings = torch.sum(token_embeddings * input_mask_expanded, 1)
             sum_mask = torch.clamp(input_mask_expanded.sum(1), min=1e-9)
             batch_embeddings = (sum_embeddings / sum_mask).cpu().numpy()
