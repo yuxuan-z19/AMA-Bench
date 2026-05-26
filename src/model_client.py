@@ -46,13 +46,30 @@ class ModelClient:
 
         self.client = self._initialize_client()
 
+    def _openai_timeout(self, default_total: float, default_read: Optional[float] = None):
+        total = float(self.config.get("timeout", self.config.get("api_timeout", default_total)))
+        connect = float(self.config.get("connect_timeout", self.config.get("api_connect_timeout", 60.0)))
+        read_default = default_read if default_read is not None else total
+        read = float(self.config.get("read_timeout", self.config.get("api_read_timeout", read_default)))
+        write = float(self.config.get("write_timeout", self.config.get("api_write_timeout", 240.0)))
+        pool = float(self.config.get("pool_timeout", self.config.get("api_pool_timeout", 60.0)))
+        try:
+            import httpx
+            return httpx.Timeout(timeout=total, connect=connect, read=read, write=write, pool=pool)
+        except ImportError:
+            return total
+
     def _initialize_client(self):
         """Initialize provider-specific client."""
         if self.provider == "custom":
             from openai import OpenAI
             base_url = self.config.get("base_url")
             api_key = self.config.get("api_key", "EMPTY")
-            return OpenAI(base_url=base_url, api_key=api_key, timeout=180.0)
+            return OpenAI(
+                base_url=base_url,
+                api_key=api_key,
+                timeout=self._openai_timeout(default_total=1800.0, default_read=600.0),
+            )
 
         elif self.provider == "openai":
             from openai import OpenAI
@@ -91,7 +108,7 @@ class ModelClient:
         else:
             raise ValueError(f"Unsupported provider: {self.provider}")
 
-    def query(self, prompt: str, temperature: float = 0.0, max_tokens: int = 4096, max_retries: int = 3, system: Optional[str] = None) -> str:
+    def query(self, prompt: str, temperature: float = 0.0, max_tokens: int = 4096, max_retries: int = 8, system: Optional[str] = None) -> str:
         """Query model with prompt with retry logic for rate limits."""
         import re as _re
         _truncated = False
@@ -99,13 +116,39 @@ class ModelClient:
         while attempt < max_retries:
             try:
                 if self.provider in ["custom", "deepseek"]:
-                    response = self.client.chat.completions.create(
-                        model=self.model,
-                        messages=[{"role": "user", "content": prompt}],
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                    )
-                    return response.choices[0].message.content.strip()
+                    extra_body = {}
+                    if "enable_thinking" in self.config:
+                        extra_body["enable_thinking"] = self.config["enable_thinking"]
+                    request_params = {
+                        "model": self.model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": temperature,
+                        "max_tokens": max_tokens,
+                        "extra_body": extra_body or None,
+                    }
+                    if self.config.get("stream"):
+                        response = self.client.chat.completions.create(
+                            **request_params,
+                            stream=True,
+                        )
+                        chunks = []
+                        for event in response:
+                            if not event.choices:
+                                continue
+                            delta = event.choices[0].delta
+                            content = getattr(delta, "content", None)
+                            if content:
+                                chunks.append(content)
+                        result = "".join(chunks).strip()
+                        if not result:
+                            raise ValueError("Empty streaming response from chat completion")
+                        return result
+
+                    response = self.client.chat.completions.create(**request_params)
+                    content = response.choices[0].message.content
+                    if not content:
+                        raise ValueError("Empty response from chat completion")
+                    return content.strip()
 
                 elif self.provider == "openai":
                     try:
@@ -208,4 +251,3 @@ class ModelClient:
                     time.sleep(wait_time)
 
         raise RuntimeError(f"Failed after {max_retries} retries")
-

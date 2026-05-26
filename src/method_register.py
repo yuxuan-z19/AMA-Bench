@@ -9,6 +9,7 @@ from src.method.bm25 import BM25Method
 from src.method.embedding_mem import EmbeddingMethod
 from src.method.longcontext import LongContextMethod
 from src.method.ama_agent import AMAAgentMethod
+from src.method.memorybank_method import MemoryBankMethod
 
 import inspect
 
@@ -19,6 +20,7 @@ _METHOD_REGISTRY: Dict[str, Type[BaseMethod]] = {
     "embedding": EmbeddingMethod,
     "longcontext": LongContextMethod,
     "ama_agent": AMAAgentMethod,
+    "memorybank": MemoryBankMethod,
 }
 
 
