@@ -1,0 +1,14 @@
+{
+  "llm_model_name": "Qwen/Qwen3-32B",
+  "llm_base_url": "http://166.111.238.55:11800/v1",
+  "embedding_model_name": "Qwen/Qwen3-Embedding-4B",
+  "embedding_base_url": "http://166.111.238.55:11801/v1",
+  "api_key": "sk-KUP5iUXThgpibU5fznCsSYRj5n3DHH",
+  "embedding_dim": 2560,
+  "save_dir": "outputs/hipporag_ama_bench",
+  "retrieval_top_k": 5,
+  "qa_top_k": 5,
+  "max_context_chars": 55000,
+  "chunk_size": 2048,
+  "chunk_overlap": 128
+}

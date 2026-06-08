@@ -24,6 +24,5 @@ results/*
 *.log
 skills/
 *_test/
-configs/
 skills/
 configs/qwen3-32B.yaml
