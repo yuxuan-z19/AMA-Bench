@@ -1,0 +1,45 @@
+{
+  "baseline_id": "memorybank",
+  "task": "AMA-Bench memory QA",
+  "dataset": {
+    "name": "AMA-Bench",
+    "split": "dataset/test/open_end_qa_set.jsonl",
+    "episode_filter": "all 208 episodes"
+  },
+  "method": {
+    "name": "memorybank",
+    "implementation": "src/method/memorybank_method.py",
+    "config": "configs/method_configs/memorybank_config.json"
+  },
+  "source": {
+    "paper": "MemoryBank: Enhancing Large Language Models with Long-Term Memory",
+    "arxiv": "2305.10250",
+    "repo": "https://github.com/zhongwanjun/MemoryBank-SiliconFriend",
+    "commit": "cf61c4196e4cfdb0f2b7a0316249fa40312dc3a9"
+  },
+  "metrics": {
+    "generation_smoke": {
+      "description": "Inference completes and writes one answers JSONL row with non-empty answers for all QA pairs.",
+      "direction": "pass",
+      "origin_path": "results/smoke_memorybank_paratera_thinking/answers_Qwen3-32B_openend_memorybank_20260521_214628.jsonl"
+    },
+    "full_generation": {
+      "description": "Full open-ended AMA-Bench answer generation completed for every episode.",
+      "direction": "pass",
+      "episodes": 208,
+      "questions": 2496,
+      "origin_path": "results/full_memorybank_paratera_thinking/answers_Qwen3-32B_openend_memorybank_merged.jsonl"
+    },
+    "llm_judge_score": {
+      "description": "AMA-Bench LLM-as-judge average score on the full open-ended test split.",
+      "direction": "higher_is_better",
+      "value": 0.44190705128205127,
+      "accuracy": 0.44190705128205127,
+      "total_questions": 2496,
+      "judge_model": "Qwen3-32B",
+      "judge_config": "configs/qwen3_api.yaml",
+      "origin_path": "results/full_memorybank_paratera_thinking/evaluation_Qwen3-32B_openend_memorybank_merged_qwen3_judge_timeout2x.json"
+    }
+  },
+  "verified_status": "full_generation_and_evaluation_verified"
+}

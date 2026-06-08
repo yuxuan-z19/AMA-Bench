@@ -34,6 +34,10 @@ class EmbeddingEngine:
         tensor_parallel_size: int = 1,
         gpu_memory_utilization: float = 0.9,
         startup_timeout: int = 120,
+        hf_endpoint: Optional[str] = None,
+        max_model_len: Optional[int] = None,
+        disable_hf_transfer: bool = True,
+        disable_xet: bool = True,
     ):
         self.model_name = model_name
         self.base_url = base_url
@@ -48,6 +52,10 @@ class EmbeddingEngine:
         self.tensor_parallel_size = tensor_parallel_size
         self.gpu_memory_utilization = gpu_memory_utilization
         self.startup_timeout = startup_timeout
+        self.hf_endpoint = hf_endpoint
+        self.max_model_len = max_model_len
+        self.disable_hf_transfer = disable_hf_transfer
+        self.disable_xet = disable_xet
         self.model = None
         self.tokenizer = None
         self._server_proc = None
@@ -77,33 +85,36 @@ class EmbeddingEngine:
         Start the vLLM embedding server as a background process and block
         until it is ready (or startup_timeout seconds have elapsed).
         """
+        task = "embed" if self.runner == "pooling" else self.runner
         cmd = [
-            "python",
-            "-m",
-            "vllm.entrypoints.openai.api_server",
-            "--model",
-            self.model_name,
-            "--host",
-            self.host,
-            "--port",
-            str(self.port),
-            "--runner",
-            self.runner,
-            "--tensor-parallel-size",
-            str(self.tensor_parallel_size),
-            "--gpu-memory-utilization",
-            str(self.gpu_memory_utilization),
+            "python", "-m", "vllm.entrypoints.openai.api_server",
+            "--model", self.model_name,
+            "--host", self.host,
+            "--port", str(self.port),
+            "--task", task,
+            "--tensor-parallel-size", str(self.tensor_parallel_size),
+            "--gpu-memory-utilization", str(self.gpu_memory_utilization),
         ]
+        if self.max_model_len is not None:
+            cmd.extend(["--max-model-len", str(self.max_model_len)])
 
         env = os.environ.copy()
         if self.cuda_visible_devices is not None:
             env["CUDA_VISIBLE_DEVICES"] = str(self.cuda_visible_devices)
+        if self.hf_endpoint:
+            env["HF_ENDPOINT"] = str(self.hf_endpoint)
+        if self.disable_hf_transfer:
+            env["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
+        if self.disable_xet:
+            env["HF_HUB_DISABLE_XET"] = "1"
 
         log_path = f"embedding_server_{self.port}.log"
-        print(
-            f"Launching vLLM embedding server: {self.model_name} "
-            f"on {self.host}:{self.port} (GPU {self.cuda_visible_devices})"
-        )
+        print(f"Launching vLLM embedding server: {self.model_name} "
+              f"on {self.host}:{self.port} task={task} (GPU {self.cuda_visible_devices})")
+        if self.hf_endpoint:
+            print(f"Using HF endpoint: {self.hf_endpoint}")
+        if self.max_model_len is not None:
+            print(f"Embedding max model length: {self.max_model_len}")
         print(f"Server log → {log_path}")
 
         with open(log_path, "w") as log_f:

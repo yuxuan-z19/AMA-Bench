@@ -295,7 +295,10 @@ class MemoryQAInterface:
         }
 
     def run(
-        self, file_path: str, episodes: Optional[List[Dict[str, Any]]] = None
+        self,
+        file_path: str,
+        episodes: Optional[List[Dict[str, Any]]] = None,
+        incremental_output_path: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Process a single JSONL file containing multiple episodes.
@@ -305,6 +308,9 @@ class MemoryQAInterface:
             file_path: Path to JSONL file (e.g., mcq_set.jsonl, open_end_qa_set.jsonl)
             episodes: Optional pre-loaded and pre-filtered list of episodes. If provided,
                       file_path is only used for display purposes and not read again.
+            incremental_output_path: Optional JSONL path. When provided, each
+                      finished episode is appended immediately before the full
+                      run completes, so long runs keep usable partial outputs.
 
         Returns:
             List of episode results, each containing:
@@ -334,28 +340,31 @@ class MemoryQAInterface:
 
         # Process episodes with parallelism
         all_results = []
+        incremental_file = None
+        if incremental_output_path:
+            incremental_path = Path(incremental_output_path)
+            incremental_path.parent.mkdir(parents=True, exist_ok=True)
+            incremental_file = open(incremental_path, "w", encoding="utf-8")
         with ThreadPoolExecutor(max_workers=self.max_concurrency_episodes) as executor:
-            futures = {
-                executor.submit(self.process_episode, episode): episode.get(
-                    "episode_id", idx
-                )
-                for idx, episode in enumerate(episodes)
-            }
+            try:
+                futures = {
+                    executor.submit(self.process_episode, episode): episode.get('episode_id', idx)
+                    for idx, episode in enumerate(episodes)
+                }
 
-            # Use tqdm for progress bar
-            with tqdm(
-                total=len(episodes), desc="Processing episodes", unit="episode"
-            ) as pbar:
-                for future in as_completed(futures):
-                    result = future.result()
-                    all_results.append(result)
-                    pbar.update(1)
-                    pbar.set_postfix(
-                        {
-                            "Episode": result["episode_id"],
-                            "Questions": len(result["answer_list"]),
-                        }
-                    )
+                # Use tqdm for progress bar
+                with tqdm(total=len(episodes), desc="Processing episodes", unit="episode") as pbar:
+                    for future in as_completed(futures):
+                        result = future.result()
+                        all_results.append(result)
+                        if incremental_file is not None:
+                            incremental_file.write(json.dumps(result) + '\n')
+                            incremental_file.flush()
+                        pbar.update(1)
+                        pbar.set_postfix({"Episode": result['episode_id'], "Questions": len(result['answer_list'])})
+            finally:
+                if incremental_file is not None:
+                    incremental_file.close()
 
         # Sort results by episode_id to maintain order
         all_results.sort(key=lambda x: x["episode_id"])
