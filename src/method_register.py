@@ -22,6 +22,7 @@ _METHOD_REGISTRY: Dict[str, Type[BaseMethod]] = {
     "embedding": EmbeddingMethod,
     "longcontext": LongContextMethod,
     "ama_agent": AMAAgentMethod,
+    "hipporag": HippoRAGMethod,
     "memorybank": MemoryBankMethod,
 }
 

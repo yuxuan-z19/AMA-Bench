@@ -1,6 +1,8 @@
 import asyncio
+import gc
 import json
 import re
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -279,6 +281,12 @@ class MemoryQAInterface:
                     for i, trace in enumerate(reasoning_traces)
                 ]
             )
+
+        # Release memory object to free large resources (graphs, embeddings, etc.)
+        if hasattr(memory, 'cleanup'):
+            memory.cleanup()
+        del memory
+        gc.collect()
 
         return {
             "episode_id": episode_id,

@@ -1,0 +1,10 @@
+# AMA-Bench LLM Configuration for remote Qwen3-32B API
+# Matches .env: OPENAI_BASE_URL and OPENAI_MODEL
+
+provider: "custom"
+model: "Qwen/Qwen3-32B"
+base_url: "http://166.111.238.55:11800/v1"
+api_key: "sk-KUP5iUXThgpibU5fznCsSYRj5n3DHH"
+
+max_model_len: 32000
+max_tokens: 8192
